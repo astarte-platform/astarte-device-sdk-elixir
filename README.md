@@ -10,7 +10,7 @@ by adding `astarte_device` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:astarte_device, "~> 0.1.0"}
+    {:astarte_device, "~> 0.11.0"}
   ]
 end
 ```
