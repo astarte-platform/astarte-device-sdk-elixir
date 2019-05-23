@@ -49,6 +49,7 @@ defmodule Astarte.Device.MixProject do
       {:hackney, "~> 1.15"},
       {:jason, "~> 1.1"},
       {:tesla, "~> 1.2"},
+      {:x509, "~> 0.5"},
       {:excoveralls, "~> 0.11.1", only: :test}
     ]
   end
