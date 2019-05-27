@@ -25,6 +25,8 @@ defmodule Astarte.Device do
 
   require Logger
 
+  # 7 days
+  @nearly_expired_seconds 7 * 24 * 60 * 60
   @key_size 4096
 
   defmodule Data do
@@ -106,10 +108,11 @@ defmodule Astarte.Device do
 
     with {:keypair, true} <-
            {:keypair, apply(credential_storage_mod, :has_keypair?, [credential_storage_state])},
-         {:certificate, true} <-
+         {:certificate, {:ok, pem_certificate}} <-
            {:certificate,
-            apply(credential_storage_mod, :has_certificate?, [credential_storage_state])} do
-      # TODO: check if certificate is still valid
+            apply(credential_storage_mod, :fetch, [:certificate, credential_storage_state])},
+         {:valid_certificate, true} <-
+           {:valid_certificate, valid_certificate?(pem_certificate)} do
       actions = [{:next_event, :internal, :connect}]
       {:ok, :disconnected, data, actions}
     else
@@ -117,11 +120,32 @@ defmodule Astarte.Device do
         actions = [{:next_event, :internal, :generate_keypair}]
         {:ok, :no_keypair, data, actions}
 
-      {:certificate, false} ->
+      {:certificate, :error} ->
+        {:ok, :no_certificate, data}
+
+      {:valid_certificate, false} ->
+        # If the certificate is invalid, we treat it like it's not there
         {:ok, :no_certificate, data}
 
       {:error, reason} ->
         {:stop, reason}
+    end
+  end
+
+  defp valid_certificate?(pem_certificate) do
+    with {:ok, certificate} <- X509.Certificate.from_pem(pem_certificate) do
+      {:Validity, _not_before, not_after} = X509.Certificate.validity(certificate)
+
+      seconds_until_expiry =
+        not_after
+        |> X509.DateTime.to_datetime()
+        |> DateTime.diff(DateTime.utc_now())
+
+      # If the certificate it's near its expiration, we treat it as invalid
+      seconds_until_expiry > @nearly_expired_seconds
+    else
+      {:error, _reason} ->
+        false
     end
   end
 
