@@ -38,6 +38,7 @@ defmodule Astarte.Device do
       :device_id,
       :client_id,
       :credentials_secret,
+      :broker_url,
       :credential_storage_mod,
       :credential_storage_state
     ]
@@ -225,8 +226,8 @@ defmodule Astarte.Device do
             ])} do
       Logger.info("#{client_id}: Received new certificate")
       new_data = %{data | credential_storage_state: new_credential_storage_state}
-      actions = [{:next_event, :internal, :connect}]
-      {:next_state, :disconnected, new_data, actions}
+      actions = [{:next_event, :internal, :request_info}]
+      {:next_state, :waiting_for_info, new_data, actions}
     else
       {:api, {:error, reason}} ->
         # HTTP request can't be made
@@ -261,6 +262,54 @@ defmodule Astarte.Device do
 
   def no_certificate(:state_timeout, :retry_request_certificate, _data) do
     actions = [{:next_event, :internal, :request_certificate}]
+    {:keep_state_and_data, actions}
+  end
+
+  def waiting_for_info(:internal, :request_info, data) do
+    %Data{
+      client_id: client_id,
+      credentials_secret: credentials_secret,
+      pairing_url: pairing_url,
+      realm: realm,
+      device_id: device_id
+    } = data
+
+    Logger.info("#{client_id}: Requesting info")
+
+    client = Astarte.API.Pairing.client(pairing_url, realm, auth_token: credentials_secret)
+
+    with {:ok, %{status: 200, body: body}} <- Astarte.API.Pairing.Devices.info(client, device_id),
+         broker_url when not is_nil(broker_url) <-
+           get_in(body, ["data", "protocols", "astarte_mqtt_v1", "broker_url"]) do
+      Logger.info("#{client_id}: Broker url is #{broker_url}")
+      new_data = %{data | broker_url: broker_url}
+      actions = [{:next_event, :internal, :connect}]
+      {:next_state, :disconnected, new_data, actions}
+    else
+      {:error, reason} ->
+        # HTTP request can't be made
+        # TODO: exponential backoff
+        Logger.warn(
+          "#{client_id}: Failed to obtain transport info: #{inspect(reason)}. Trying again in 30 seconds"
+        )
+
+        actions = [{:state_timeout, 30_000, :retry_request_info}]
+        {:keep_state_and_data, actions}
+
+      {:ok, %{status: status, body: body}} ->
+        # HTTP request succeeded but returned an error status
+        # TODO: pattern match on the status + exponential backoff
+        Logger.warn(
+          "#{client_id}: Get info failed with status #{status}: #{inspect(body)}. Trying again in 30 seconds."
+        )
+
+        actions = [{:state_timeout, 30_000, :retry_request_info}]
+        {:keep_state_and_data, actions}
+    end
+  end
+
+  def waiting_for_info(:state_timeout, :retry_request_info, _data) do
+    actions = [{:next_event, :internal, :request_info}]
     {:keep_state_and_data, actions}
   end
 
