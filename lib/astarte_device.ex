@@ -142,12 +142,12 @@ defmodule Astarte.Device do
       |> X509.CSR.new("CN=#{client_id}")
       |> X509.CSR.to_pem()
 
-    der_private_key = {:RSAPrivateKey, X509.PrivateKey.to_der(private_key)}
+    pem_private_key = X509.PrivateKey.to_pem(private_key)
 
     with {:ok, with_key_state} <-
            apply(credential_storage_mod, :save, [
              :private_key,
-             der_private_key,
+             pem_private_key,
              credential_storage_state
            ]),
          {:ok, with_key_and_csr_state} <-
@@ -191,12 +191,12 @@ defmodule Astarte.Device do
 
     with {:api, {:ok, %{status: 201, body: body}}} <-
            {:api, Astarte.API.Pairing.Devices.get_mqtt_v1_credentials(client, device_id, csr)},
-         %{"data" => %{"client_crt" => certificate}} = body,
+         %{"data" => %{"client_crt" => pem_certificate}} = body,
          {:store, {:ok, new_credential_storage_state}} <-
            {:store,
             apply(credential_storage_mod, :save, [
               :certificate,
-              certificate,
+              pem_certificate,
               credential_storage_state
             ])} do
       Logger.info("#{client_id}: Received new certificate")
