@@ -39,6 +39,7 @@ defmodule Astarte.Device do
       :client_id,
       :credentials_secret,
       :broker_url,
+      :mqtt_connection,
       :ignore_ssl_errors,
       :credential_storage_mod,
       :credential_storage_state
@@ -318,7 +319,75 @@ defmodule Astarte.Device do
     {:keep_state_and_data, actions}
   end
 
-  def disconnected(_event_type, _event, _data) do
+  def disconnected(:internal, :connect, data) do
+    %Data{
+      client_id: client_id,
+      broker_url: broker_url,
+      ignore_ssl_errors: ignore_ssl_errors,
+      credential_storage_mod: credential_storage_mod,
+      credential_storage_state: credential_storage_state
+    } = data
+
+    %URI{
+      host: broker_host,
+      port: broker_port
+    } = URI.parse(broker_url)
+
+    verify = if ignore_ssl_errors, do: :verify_none, else: :verify_peer
+
+    with {:ok, pem_private_key} <-
+           apply(credential_storage_mod, :fetch, [:private_key, credential_storage_state]),
+         {:ok, pem_certificate} <-
+           apply(credential_storage_mod, :fetch, [:certificate, credential_storage_state]) do
+      der_certificate =
+        pem_certificate
+        |> X509.Certificate.from_pem!()
+        |> X509.Certificate.to_der()
+
+      der_private_key =
+        pem_private_key
+        |> X509.PrivateKey.from_pem!()
+        |> X509.PrivateKey.to_der()
+
+      server_opts = [
+        host: broker_host,
+        port: broker_port,
+        cacertfile: :certifi.cacertfile(),
+        key: {:RSAPrivateKey, der_private_key},
+        cert: der_certificate,
+        verify: verify
+      ]
+
+      tortoise_opts = [
+        client_id: client_id,
+        handler: {Tortoise.Handler.Logger, []},
+        server: {Tortoise.Transport.SSL, server_opts}
+      ]
+
+      # TODO: trap exits to catch SSL errors, timeouts etc
+      case Tortoise.Connection.start_link(tortoise_opts) do
+        {:ok, pid} ->
+          new_data = %{data | mqtt_connection: pid}
+          {:next_state, :connecting, new_data}
+
+        {:error, reason} ->
+          Logger.warn(
+            "#{client_id}: failed to connect: #{inspect(reason)}. Trying again in 30 seconds."
+          )
+
+          # TODO: exponential backoff
+          actions = [{:state_timeout, :retry_connect, 30_000}]
+          {:keep_state_and_data, actions}
+      end
+    end
+  end
+
+  def disconnected(:state_timeout, :retry_connect, _data) do
+    actions = [{:next_event, :internal, :connect}]
+    {:keep_state_and_data, actions}
+  end
+
+  def connecting(_event_type, _event, _data) do
     :keep_state_and_data
   end
 end
