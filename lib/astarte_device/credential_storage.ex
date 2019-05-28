@@ -39,7 +39,7 @@ defmodule Astarte.Device.CredentialStorage do
   @doc """
   Save the specified credential to the credential storage.
   """
-  @callback save(key :: credential(), value :: term(), state :: term()) ::
+  @callback save(key :: credential(), value :: String.t(), state :: term()) ::
               {:ok, new_state :: term()}
               | {:error, reason :: term()}
 
@@ -47,7 +47,7 @@ defmodule Astarte.Device.CredentialStorage do
   Fetch the specified credential from the credential storage.
   """
   @callback fetch(key :: credential(), state :: term()) ::
-              {:ok, credential :: term()}
+              {:ok, credential :: String.t()}
               | :error
 
   defmacro __using__(_args) do

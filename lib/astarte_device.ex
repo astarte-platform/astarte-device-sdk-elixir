@@ -25,6 +25,8 @@ defmodule Astarte.Device do
 
   require Logger
 
+  # 7 days
+  @nearly_expired_seconds 7 * 24 * 60 * 60
   @key_size 4096
 
   defmodule Data do
@@ -36,6 +38,9 @@ defmodule Astarte.Device do
       :device_id,
       :client_id,
       :credentials_secret,
+      :broker_url,
+      :mqtt_connection,
+      :ignore_ssl_errors,
       :credential_storage_mod,
       :credential_storage_state
     ]
@@ -52,6 +57,7 @@ defmodule Astarte.Device do
     * `device_id` - Device ID of the device. The device ID must be 128-bit long and must be encoded with url-safe base64 without padding. You can generate a random one with `:crypto.strong_rand_bytes(16) |> Base.url_encode64(padding: false)`.
     * `credentials_secret` - The credentials secret obtained when registering the device using Pairing API (to register a device use `Astarte.API.Pairing.Agent.register_device/2` or see https://docs.astarte-platform.org/latest/api/index.html?urls.primaryName=Pairing%20API#/agent/registerDevice).
     * `credential_storage` - A tuple `{module, args}` where `module` is a module implementing `Astarte.Device.CredentialStorage` behaviour and `args` are the arguments passed to its init function
+    * `ignore_ssl_errors` - Defaults to `false`, if `true` the device will ignore SSL errors during connection. Useful if you're using the Device to connect to a test instance of Astarte with self signed certificates, it is not recommended to leave this `true` in production.
   """
   @spec start_link(device_options) :: :gen_statem.start_ret()
         when device_option:
@@ -59,7 +65,8 @@ defmodule Astarte.Device do
                | {:realm, String.t()}
                | {:device_id, String.t()}
                | {:credentials_secret, String.t()}
-               | {:credential_storage, {module(), term()}},
+               | {:credential_storage, {module(), term()}}
+               | {:ignore_ssl_errors, boolean()},
              device_options: [device_option]
   def start_link(device_options) do
     pairing_url = Keyword.fetch!(device_options, :pairing_url)
@@ -67,6 +74,7 @@ defmodule Astarte.Device do
     device_id = Keyword.fetch!(device_options, :device_id)
     client_id = "#{realm}/#{device_id}"
     credentials_secret = Keyword.fetch!(device_options, :credentials_secret)
+    ignore_ssl_errors = Keyword.get(device_options, :ignore_ssl_errors, false)
 
     {credential_storage_mod, credential_storage_args} =
       Keyword.fetch!(device_options, :credential_storage)
@@ -79,6 +87,7 @@ defmodule Astarte.Device do
           device_id: device_id,
           client_id: client_id,
           credentials_secret: credentials_secret,
+          ignore_ssl_errors: ignore_ssl_errors,
           credential_storage_mod: credential_storage_mod,
           credential_storage_state: credential_storage_state
         }
@@ -106,10 +115,11 @@ defmodule Astarte.Device do
 
     with {:keypair, true} <-
            {:keypair, apply(credential_storage_mod, :has_keypair?, [credential_storage_state])},
-         {:certificate, true} <-
+         {:certificate, {:ok, pem_certificate}} <-
            {:certificate,
-            apply(credential_storage_mod, :has_certificate?, [credential_storage_state])} do
-      # TODO: check if certificate is still valid
+            apply(credential_storage_mod, :fetch, [:certificate, credential_storage_state])},
+         {:valid_certificate, true} <-
+           {:valid_certificate, valid_certificate?(pem_certificate)} do
       actions = [{:next_event, :internal, :connect}]
       {:ok, :disconnected, data, actions}
     else
@@ -117,11 +127,32 @@ defmodule Astarte.Device do
         actions = [{:next_event, :internal, :generate_keypair}]
         {:ok, :no_keypair, data, actions}
 
-      {:certificate, false} ->
+      {:certificate, :error} ->
+        {:ok, :no_certificate, data}
+
+      {:valid_certificate, false} ->
+        # If the certificate is invalid, we treat it like it's not there
         {:ok, :no_certificate, data}
 
       {:error, reason} ->
         {:stop, reason}
+    end
+  end
+
+  defp valid_certificate?(pem_certificate) do
+    with {:ok, certificate} <- X509.Certificate.from_pem(pem_certificate) do
+      {:Validity, _not_before, not_after} = X509.Certificate.validity(certificate)
+
+      seconds_until_expiry =
+        not_after
+        |> X509.DateTime.to_datetime()
+        |> DateTime.diff(DateTime.utc_now())
+
+      # If the certificate it's near its expiration, we treat it as invalid
+      seconds_until_expiry > @nearly_expired_seconds
+    else
+      {:error, _reason} ->
+        false
     end
   end
 
@@ -142,12 +173,12 @@ defmodule Astarte.Device do
       |> X509.CSR.new("CN=#{client_id}")
       |> X509.CSR.to_pem()
 
-    der_private_key = {:RSAPrivateKey, X509.PrivateKey.to_der(private_key)}
+    pem_private_key = X509.PrivateKey.to_pem(private_key)
 
     with {:ok, with_key_state} <-
            apply(credential_storage_mod, :save, [
              :private_key,
-             der_private_key,
+             pem_private_key,
              credential_storage_state
            ]),
          {:ok, with_key_and_csr_state} <-
@@ -191,18 +222,18 @@ defmodule Astarte.Device do
 
     with {:api, {:ok, %{status: 201, body: body}}} <-
            {:api, Astarte.API.Pairing.Devices.get_mqtt_v1_credentials(client, device_id, csr)},
-         %{"data" => %{"client_crt" => certificate}} = body,
+         %{"data" => %{"client_crt" => pem_certificate}} = body,
          {:store, {:ok, new_credential_storage_state}} <-
            {:store,
             apply(credential_storage_mod, :save, [
               :certificate,
-              certificate,
+              pem_certificate,
               credential_storage_state
             ])} do
       Logger.info("#{client_id}: Received new certificate")
       new_data = %{data | credential_storage_state: new_credential_storage_state}
-      actions = [{:next_event, :internal, :connect}]
-      {:next_state, :disconnected, new_data, actions}
+      actions = [{:next_event, :internal, :request_info}]
+      {:next_state, :waiting_for_info, new_data, actions}
     else
       {:api, {:error, reason}} ->
         # HTTP request can't be made
@@ -240,7 +271,176 @@ defmodule Astarte.Device do
     {:keep_state_and_data, actions}
   end
 
-  def disconnected(_event_type, _event, _data) do
+  def waiting_for_info(:internal, :request_info, data) do
+    %Data{
+      client_id: client_id,
+      credentials_secret: credentials_secret,
+      pairing_url: pairing_url,
+      realm: realm,
+      device_id: device_id
+    } = data
+
+    Logger.info("#{client_id}: Requesting info")
+
+    client = Astarte.API.Pairing.client(pairing_url, realm, auth_token: credentials_secret)
+
+    with {:ok, %{status: 200, body: body}} <- Astarte.API.Pairing.Devices.info(client, device_id),
+         broker_url when not is_nil(broker_url) <-
+           get_in(body, ["data", "protocols", "astarte_mqtt_v1", "broker_url"]) do
+      Logger.info("#{client_id}: Broker url is #{broker_url}")
+      new_data = %{data | broker_url: broker_url}
+      actions = [{:next_event, :internal, :connect}]
+      {:next_state, :disconnected, new_data, actions}
+    else
+      {:error, reason} ->
+        # HTTP request can't be made
+        # TODO: exponential backoff
+        Logger.warn(
+          "#{client_id}: Failed to obtain transport info: #{inspect(reason)}. Trying again in 30 seconds"
+        )
+
+        actions = [{:state_timeout, 30_000, :retry_request_info}]
+        {:keep_state_and_data, actions}
+
+      {:ok, %{status: status, body: body}} ->
+        # HTTP request succeeded but returned an error status
+        # TODO: pattern match on the status + exponential backoff
+        Logger.warn(
+          "#{client_id}: Get info failed with status #{status}: #{inspect(body)}. Trying again in 30 seconds."
+        )
+
+        actions = [{:state_timeout, 30_000, :retry_request_info}]
+        {:keep_state_and_data, actions}
+    end
+  end
+
+  def waiting_for_info(:state_timeout, :retry_request_info, _data) do
+    actions = [{:next_event, :internal, :request_info}]
+    {:keep_state_and_data, actions}
+  end
+
+  def disconnected(:internal, :connect, data) do
+    %Data{
+      client_id: client_id,
+      broker_url: broker_url,
+      ignore_ssl_errors: ignore_ssl_errors,
+      credential_storage_mod: credential_storage_mod,
+      credential_storage_state: credential_storage_state
+    } = data
+
+    %URI{
+      host: broker_host,
+      port: broker_port
+    } = URI.parse(broker_url)
+
+    verify = if ignore_ssl_errors, do: :verify_none, else: :verify_peer
+
+    with {:ok, pem_private_key} <-
+           apply(credential_storage_mod, :fetch, [:private_key, credential_storage_state]),
+         {:ok, pem_certificate} <-
+           apply(credential_storage_mod, :fetch, [:certificate, credential_storage_state]) do
+      der_certificate =
+        pem_certificate
+        |> X509.Certificate.from_pem!()
+        |> X509.Certificate.to_der()
+
+      der_private_key =
+        pem_private_key
+        |> X509.PrivateKey.from_pem!()
+        |> X509.PrivateKey.to_der()
+
+      server_opts = [
+        host: broker_host,
+        port: broker_port,
+        cacertfile: :certifi.cacertfile(),
+        key: {:RSAPrivateKey, der_private_key},
+        cert: der_certificate,
+        verify: verify
+      ]
+
+      tortoise_opts = [
+        client_id: client_id,
+        handler: {Astarte.Device.MqttHandler, device_pid: self()},
+        server: {Tortoise.Transport.SSL, server_opts}
+      ]
+
+      # TODO: trap exits to catch SSL errors, timeouts etc
+      case Tortoise.Connection.start_link(tortoise_opts) do
+        {:ok, pid} ->
+          new_data = %{data | mqtt_connection: pid}
+          {:next_state, :connecting, new_data}
+
+        {:error, reason} ->
+          Logger.warn(
+            "#{client_id}: failed to connect: #{inspect(reason)}. Trying again in 30 seconds."
+          )
+
+          # TODO: exponential backoff
+          actions = [{:state_timeout, :retry_connect, 30_000}]
+          {:keep_state_and_data, actions}
+      end
+    end
+  end
+
+  def disconnected(:state_timeout, :retry_connect, _data) do
+    actions = [{:next_event, :internal, :connect}]
+    {:keep_state_and_data, actions}
+  end
+
+  def connecting(:cast, {:connection_status, :up}, %Data{client_id: client_id} = data) do
+    Logger.info("#{client_id}: Connected")
+
+    # TODO: we always send empty cache and producer properties for now since we can't access the session_present flag
+    actions = [
+      {:next_event, :internal, :send_introspection},
+      {:next_event, :internal, :send_empty_cache},
+      {:next_event, :internal, :send_producer_properties}
+    ]
+
+    {:next_state, :connected, data, actions}
+  end
+
+  def connected(:internal, :send_introspection, data) do
+    %Data{
+      client_id: client_id
+    } = data
+
+    Logger.info("#{client_id}: Sending introspection")
+    # TODO: build and send introspection
+
+    :keep_state_and_data
+  end
+
+  def connected(:internal, :send_empty_cache, data) do
+    %Data{
+      client_id: client_id
+    } = data
+
+    Logger.info("#{client_id}: Sending empty cache")
+    # TODO: send empty cache
+
+    :keep_state_and_data
+  end
+
+  def connected(:internal, :send_producer_properties, data) do
+    %Data{
+      client_id: client_id
+    } = data
+
+    Logger.info("#{client_id}: Sending producer properties")
+    # TODO: build and send producer properties
+
+    :keep_state_and_data
+  end
+
+  def connected(:cast, {:connection_status, :down}, %Data{client_id: client_id} = data) do
+    # Tortoise will reconnect for us, just go to the :connecting state
+    Logger.info("#{client_id}: Disconnected. Retrying connection...")
+
+    {:next_state, :connecting, data}
+  end
+
+  def connected(_event_type, _event, _data) do
     :keep_state_and_data
   end
 end
