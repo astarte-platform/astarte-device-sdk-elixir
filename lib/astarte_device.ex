@@ -39,6 +39,7 @@ defmodule Astarte.Device do
       :client_id,
       :credentials_secret,
       :broker_url,
+      :ignore_ssl_errors,
       :credential_storage_mod,
       :credential_storage_state
     ]
@@ -55,6 +56,7 @@ defmodule Astarte.Device do
     * `device_id` - Device ID of the device. The device ID must be 128-bit long and must be encoded with url-safe base64 without padding. You can generate a random one with `:crypto.strong_rand_bytes(16) |> Base.url_encode64(padding: false)`.
     * `credentials_secret` - The credentials secret obtained when registering the device using Pairing API (to register a device use `Astarte.API.Pairing.Agent.register_device/2` or see https://docs.astarte-platform.org/latest/api/index.html?urls.primaryName=Pairing%20API#/agent/registerDevice).
     * `credential_storage` - A tuple `{module, args}` where `module` is a module implementing `Astarte.Device.CredentialStorage` behaviour and `args` are the arguments passed to its init function
+    * `ignore_ssl_errors` - Defaults to `false`, if `true` the device will ignore SSL errors during connection. Useful if you're using the Device to connect to a test instance of Astarte with self signed certificates, it is not recommended to leave this `true` in production.
   """
   @spec start_link(device_options) :: :gen_statem.start_ret()
         when device_option:
@@ -62,7 +64,8 @@ defmodule Astarte.Device do
                | {:realm, String.t()}
                | {:device_id, String.t()}
                | {:credentials_secret, String.t()}
-               | {:credential_storage, {module(), term()}},
+               | {:credential_storage, {module(), term()}}
+               | {:ignore_ssl_errors, boolean()},
              device_options: [device_option]
   def start_link(device_options) do
     pairing_url = Keyword.fetch!(device_options, :pairing_url)
@@ -70,6 +73,7 @@ defmodule Astarte.Device do
     device_id = Keyword.fetch!(device_options, :device_id)
     client_id = "#{realm}/#{device_id}"
     credentials_secret = Keyword.fetch!(device_options, :credentials_secret)
+    ignore_ssl_errors = Keyword.get(device_options, :ignore_ssl_errors, false)
 
     {credential_storage_mod, credential_storage_args} =
       Keyword.fetch!(device_options, :credential_storage)
@@ -82,6 +86,7 @@ defmodule Astarte.Device do
           device_id: device_id,
           client_id: client_id,
           credentials_secret: credentials_secret,
+          ignore_ssl_errors: ignore_ssl_errors,
           credential_storage_mod: credential_storage_mod,
           credential_storage_state: credential_storage_state
         }
