@@ -46,9 +46,11 @@ defmodule Astarte.Device.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
+      {:certifi, "~> 2.5"},
       {:hackney, "~> 1.15"},
       {:jason, "~> 1.1"},
       {:tesla, "~> 1.2"},
+      {:tortoise, "~> 0.9"},
       {:x509, "~> 0.5"},
       {:excoveralls, "~> 0.11.1", only: :test}
     ]
