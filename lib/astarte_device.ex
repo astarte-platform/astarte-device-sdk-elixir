@@ -387,7 +387,60 @@ defmodule Astarte.Device do
     {:keep_state_and_data, actions}
   end
 
-  def connecting(_event_type, _event, _data) do
+  def connecting(:cast, {:connection_status, :up}, %Data{client_id: client_id} = data) do
+    Logger.info("#{client_id}: Connected")
+
+    # TODO: we always send empty cache and producer properties for now since we can't access the session_present flag
+    actions = [
+      {:next_event, :internal, :send_introspection},
+      {:next_event, :internal, :send_empty_cache},
+      {:next_event, :internal, :send_producer_properties}
+    ]
+
+    {:next_state, :connected, data, actions}
+  end
+
+  def connected(:internal, :send_introspection, data) do
+    %Data{
+      client_id: client_id
+    } = data
+
+    Logger.info("#{client_id}: Sending introspection")
+    # TODO: build and send introspection
+
+    :keep_state_and_data
+  end
+
+  def connected(:internal, :send_empty_cache, data) do
+    %Data{
+      client_id: client_id
+    } = data
+
+    Logger.info("#{client_id}: Sending empty cache")
+    # TODO: send empty cache
+
+    :keep_state_and_data
+  end
+
+  def connected(:internal, :send_producer_properties, data) do
+    %Data{
+      client_id: client_id
+    } = data
+
+    Logger.info("#{client_id}: Sending producer properties")
+    # TODO: build and send producer properties
+
+    :keep_state_and_data
+  end
+
+  def connected(:cast, {:connection_status, :down}, %Data{client_id: client_id} = data) do
+    # Tortoise will reconnect for us, just go to the :connecting state
+    Logger.info("#{client_id}: Disconnected. Retrying connection...")
+
+    {:next_state, :connecting, data}
+  end
+
+  def connected(_event_type, _event, _data) do
     :keep_state_and_data
   end
 end
