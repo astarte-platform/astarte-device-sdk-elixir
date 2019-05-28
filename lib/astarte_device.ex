@@ -360,7 +360,7 @@ defmodule Astarte.Device do
 
       tortoise_opts = [
         client_id: client_id,
-        handler: {Tortoise.Handler.Logger, []},
+        handler: {Astarte.Device.MqttHandler, device_pid: self()},
         server: {Tortoise.Transport.SSL, server_opts}
       ]
 
