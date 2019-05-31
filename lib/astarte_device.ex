@@ -79,7 +79,7 @@ defmodule Astarte.Device do
     {credential_storage_mod, credential_storage_args} =
       Keyword.fetch!(device_options, :credential_storage)
 
-    case apply(credential_storage_mod, :init, [credential_storage_args]) do
+    case credential_storage_mod.init(credential_storage_args) do
       {:ok, credential_storage_state} ->
         data = %Data{
           pairing_url: pairing_url,
@@ -114,10 +114,9 @@ defmodule Astarte.Device do
     } = data
 
     with {:keypair, true} <-
-           {:keypair, apply(credential_storage_mod, :has_keypair?, [credential_storage_state])},
+           {:keypair, credential_storage_mod.has_keypair?(credential_storage_state)},
          {:certificate, {:ok, pem_certificate}} <-
-           {:certificate,
-            apply(credential_storage_mod, :fetch, [:certificate, credential_storage_state])},
+           {:certificate, credential_storage_mod.fetch(:certificate, credential_storage_state)},
          {:valid_certificate, true} <-
            {:valid_certificate, valid_certificate?(pem_certificate)} do
       actions = [{:next_event, :internal, :connect}]
@@ -176,13 +175,13 @@ defmodule Astarte.Device do
     pem_private_key = X509.PrivateKey.to_pem(private_key)
 
     with {:ok, with_key_state} <-
-           apply(credential_storage_mod, :save, [
+           credential_storage_mod.save(
              :private_key,
              pem_private_key,
              credential_storage_state
-           ]),
+           ),
          {:ok, with_key_and_csr_state} <-
-           apply(credential_storage_mod, :save, [:csr, pem_csr, with_key_state]) do
+           credential_storage_mod.save(:csr, pem_csr, with_key_state) do
       new_data = %{data | credential_storage_state: with_key_and_csr_state}
       actions = [{:next_event, :internal, :request_certificate}]
 
@@ -218,18 +217,18 @@ defmodule Astarte.Device do
     Logger.info("#{client_id}: Requesting new certificate")
 
     client = Astarte.API.Pairing.client(pairing_url, realm, auth_token: credentials_secret)
-    {:ok, csr} = apply(credential_storage_mod, :fetch, [:csr, credential_storage_state])
+    {:ok, csr} = credential_storage_mod.fetch(:csr, credential_storage_state)
 
     with {:api, {:ok, %{status: 201, body: body}}} <-
            {:api, Astarte.API.Pairing.Devices.get_mqtt_v1_credentials(client, device_id, csr)},
          %{"data" => %{"client_crt" => pem_certificate}} = body,
          {:store, {:ok, new_credential_storage_state}} <-
            {:store,
-            apply(credential_storage_mod, :save, [
+            credential_storage_mod.save(
               :certificate,
               pem_certificate,
               credential_storage_state
-            ])} do
+            )} do
       Logger.info("#{client_id}: Received new certificate")
       new_data = %{data | credential_storage_state: new_credential_storage_state}
       actions = [{:next_event, :internal, :request_info}]
@@ -336,9 +335,9 @@ defmodule Astarte.Device do
     verify = if ignore_ssl_errors, do: :verify_none, else: :verify_peer
 
     with {:ok, pem_private_key} <-
-           apply(credential_storage_mod, :fetch, [:private_key, credential_storage_state]),
+           credential_storage_mod.fetch(:private_key, credential_storage_state),
          {:ok, pem_certificate} <-
-           apply(credential_storage_mod, :fetch, [:certificate, credential_storage_state]) do
+           credential_storage_mod.fetch(:certificate, credential_storage_state) do
       der_certificate =
         pem_certificate
         |> X509.Certificate.from_pem!()
