@@ -42,7 +42,9 @@ defmodule Astarte.Device do
       :mqtt_connection,
       :ignore_ssl_errors,
       :credential_storage_mod,
-      :credential_storage_state
+      :credential_storage_state,
+      :interface_provider_mod,
+      :interface_provider_state
     ]
   end
 
@@ -66,6 +68,7 @@ defmodule Astarte.Device do
                | {:device_id, String.t()}
                | {:credentials_secret, String.t()}
                | {:credential_storage, {module(), term()}}
+               | {:interface_provider, {module(), term()}}
                | {:ignore_ssl_errors, boolean()},
              device_options: [device_option]
   def start_link(device_options) do
@@ -79,27 +82,41 @@ defmodule Astarte.Device do
     {credential_storage_mod, credential_storage_args} =
       Keyword.fetch!(device_options, :credential_storage)
 
-    case credential_storage_mod.init(credential_storage_args) do
-      {:ok, credential_storage_state} ->
-        data = %Data{
-          pairing_url: pairing_url,
-          realm: realm,
-          device_id: device_id,
-          client_id: client_id,
-          credentials_secret: credentials_secret,
-          ignore_ssl_errors: ignore_ssl_errors,
-          credential_storage_mod: credential_storage_mod,
-          credential_storage_state: credential_storage_state
-        }
+    {interface_provider_mod, interface_provider_args} =
+      Keyword.fetch!(device_options, :interface_provider)
 
-        :gen_statem.start_link(__MODULE__, data, [])
+    with {:cred, {:ok, credential_storage_state}} <-
+           {:cred, credential_storage_mod.init(credential_storage_args)},
+         {:interface, {:ok, interface_provider_state}} <-
+           {:interface, interface_provider_mod.init(interface_provider_args)} do
+      data = %Data{
+        pairing_url: pairing_url,
+        realm: realm,
+        device_id: device_id,
+        client_id: client_id,
+        credentials_secret: credentials_secret,
+        ignore_ssl_errors: ignore_ssl_errors,
+        credential_storage_mod: credential_storage_mod,
+        credential_storage_state: credential_storage_state,
+        interface_provider_mod: interface_provider_mod,
+        interface_provider_state: interface_provider_state
+      }
 
-      {:error, reason} ->
+      :gen_statem.start_link(__MODULE__, data, [])
+    else
+      {:cred, {:error, reason}} ->
         Logger.warn(
           "#{client_id}: Can't initialize CredentialStorage for #{client_id}: #{inspect(reason)}"
         )
 
         {:error, :credential_storage_failed}
+
+      {:interface, {:error, reason}} ->
+        Logger.warn(
+          "#{client_id}: Can't initialize InterfaceProvider for #{client_id}: #{inspect(reason)}"
+        )
+
+        {:error, :interface_provider_failed}
     end
   end
 
