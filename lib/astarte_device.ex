@@ -106,16 +106,18 @@ defmodule Astarte.Device do
       :gen_statem.start_link(__MODULE__, data, [])
     else
       {:cred, {:error, reason}} ->
-        Logger.warn(
-          "#{client_id}: Can't initialize CredentialStorage for #{client_id}: #{inspect(reason)}"
-        )
+        _ =
+          Logger.warn(
+            "#{client_id}: Can't initialize CredentialStorage for #{client_id}: #{inspect(reason)}"
+          )
 
         {:error, :credential_storage_failed}
 
       {:interface, {:error, reason}} ->
-        Logger.warn(
-          "#{client_id}: Can't initialize InterfaceProvider for #{client_id}: #{inspect(reason)}"
-        )
+        _ =
+          Logger.warn(
+            "#{client_id}: Can't initialize InterfaceProvider for #{client_id}: #{inspect(reason)}"
+          )
 
         {:error, :interface_provider_failed}
     end
@@ -180,7 +182,7 @@ defmodule Astarte.Device do
       credential_storage_state: credential_storage_state
     } = data
 
-    Logger.info("#{client_id}: Generating a new keypair")
+    _ = Logger.info("#{client_id}: Generating a new keypair")
 
     # TODO: make crypto configurable (RSA/EC, key size/curve)
     private_key = X509.PrivateKey.new_rsa(@key_size)
@@ -207,9 +209,10 @@ defmodule Astarte.Device do
     else
       {:error, reason} ->
         # TODO: exponential backoff
-        Logger.warn(
-          "#{client_id}: Failed to save keypair to credential storage: #{inspect(reason)}, trying again in 5 seconds"
-        )
+        _ =
+          Logger.warn(
+            "#{client_id}: Failed to save keypair to credential storage: #{inspect(reason)}, trying again in 5 seconds"
+          )
 
         actions = [{:state_timeout, 5000, :retry_generate_keypair}]
         {:keep_state_and_data, actions}
@@ -232,7 +235,7 @@ defmodule Astarte.Device do
       credential_storage_state: credential_storage_state
     } = data
 
-    Logger.info("#{client_id}: Requesting new certificate")
+    _ = Logger.info("#{client_id}: Requesting new certificate")
 
     client = Astarte.API.Pairing.client(pairing_url, realm, auth_token: credentials_secret)
     {:ok, csr} = credential_storage_mod.fetch(:csr, credential_storage_state)
@@ -247,7 +250,7 @@ defmodule Astarte.Device do
               pem_certificate,
               credential_storage_state
             )} do
-      Logger.info("#{client_id}: Received new certificate")
+      _ = Logger.info("#{client_id}: Received new certificate")
       new_data = %{data | credential_storage_state: new_credential_storage_state}
       actions = [{:next_event, :internal, :request_info}]
       {:next_state, :waiting_for_info, new_data, actions}
@@ -255,9 +258,10 @@ defmodule Astarte.Device do
       {:api, {:error, reason}} ->
         # HTTP request can't be made
         # TODO: exponential backoff
-        Logger.warn(
-          "#{client_id}: Failed to ask for a certificate: #{inspect(reason)}. Trying again in 30 seconds"
-        )
+        _ =
+          Logger.warn(
+            "#{client_id}: Failed to ask for a certificate: #{inspect(reason)}. Trying again in 30 seconds"
+          )
 
         actions = [{:state_timeout, 30_000, :retry_request_certificate}]
         {:keep_state_and_data, actions}
@@ -265,18 +269,20 @@ defmodule Astarte.Device do
       {:api, {:ok, %{status: status, body: body}}} ->
         # HTTP request succeeded but returned an error status
         # TODO: pattern match on the status + exponential backoff
-        Logger.warn(
-          "#{client_id}: Get credentials failed with status #{status}: #{inspect(body)}. Trying again in 30 seconds."
-        )
+        _ =
+          Logger.warn(
+            "#{client_id}: Get credentials failed with status #{status}: #{inspect(body)}. Trying again in 30 seconds."
+          )
 
         actions = [{:state_timeout, 30_000, :retry_request_certificate}]
         {:keep_state_and_data, actions}
 
       {:store, {:error, reason}} ->
         # TODO: exponential backoff
-        Logger.warn(
-          "#{client_id}: Credential storage could not save certificate: #{inspect(reason)}. Trying again in 30 seconds."
-        )
+        _ =
+          Logger.warn(
+            "#{client_id}: Credential storage could not save certificate: #{inspect(reason)}. Trying again in 30 seconds."
+          )
 
         actions = [{:state_timeout, 30_000, :retry_request_certificate}]
         {:keep_state_and_data, actions}
@@ -297,14 +303,14 @@ defmodule Astarte.Device do
       device_id: device_id
     } = data
 
-    Logger.info("#{client_id}: Requesting info")
+    _ = Logger.info("#{client_id}: Requesting info")
 
     client = Astarte.API.Pairing.client(pairing_url, realm, auth_token: credentials_secret)
 
     with {:ok, %{status: 200, body: body}} <- Astarte.API.Pairing.Devices.info(client, device_id),
          broker_url when not is_nil(broker_url) <-
            get_in(body, ["data", "protocols", "astarte_mqtt_v1", "broker_url"]) do
-      Logger.info("#{client_id}: Broker url is #{broker_url}")
+      _ = Logger.info("#{client_id}: Broker url is #{broker_url}")
       new_data = %{data | broker_url: broker_url}
       actions = [{:next_event, :internal, :connect}]
       {:next_state, :disconnected, new_data, actions}
@@ -312,9 +318,10 @@ defmodule Astarte.Device do
       {:error, reason} ->
         # HTTP request can't be made
         # TODO: exponential backoff
-        Logger.warn(
-          "#{client_id}: Failed to obtain transport info: #{inspect(reason)}. Trying again in 30 seconds"
-        )
+        _ =
+          Logger.warn(
+            "#{client_id}: Failed to obtain transport info: #{inspect(reason)}. Trying again in 30 seconds"
+          )
 
         actions = [{:state_timeout, 30_000, :retry_request_info}]
         {:keep_state_and_data, actions}
@@ -322,9 +329,10 @@ defmodule Astarte.Device do
       {:ok, %{status: status, body: body}} ->
         # HTTP request succeeded but returned an error status
         # TODO: pattern match on the status + exponential backoff
-        Logger.warn(
-          "#{client_id}: Get info failed with status #{status}: #{inspect(body)}. Trying again in 30 seconds."
-        )
+        _ =
+          Logger.warn(
+            "#{client_id}: Get info failed with status #{status}: #{inspect(body)}. Trying again in 30 seconds."
+          )
 
         actions = [{:state_timeout, 30_000, :retry_request_info}]
         {:keep_state_and_data, actions}
@@ -396,9 +404,10 @@ defmodule Astarte.Device do
           {:next_state, :connecting, new_data}
 
         {:error, reason} ->
-          Logger.warn(
-            "#{client_id}: failed to connect: #{inspect(reason)}. Trying again in 30 seconds."
-          )
+          _ =
+            Logger.warn(
+              "#{client_id}: failed to connect: #{inspect(reason)}. Trying again in 30 seconds."
+            )
 
           # TODO: exponential backoff
           actions = [{:state_timeout, :retry_connect, 30_000}]
@@ -425,7 +434,7 @@ defmodule Astarte.Device do
   end
 
   def connecting(:cast, {:connection_status, :up}, %Data{client_id: client_id} = data) do
-    Logger.info("#{client_id}: Connected")
+    _ = Logger.info("#{client_id}: Connected")
 
     # TODO: we always send empty cache and producer properties for now since we can't access the session_present flag
     actions = [
@@ -448,7 +457,7 @@ defmodule Astarte.Device do
 
     introspection = build_introspection(interfaces)
 
-    Logger.info("#{client_id}: Sending introspection: #{introspection}")
+    _ = Logger.info("#{client_id}: Sending introspection: #{introspection}")
 
     # Introspection topic is the same as client_id
     topic = client_id
@@ -462,7 +471,7 @@ defmodule Astarte.Device do
       client_id: client_id
     } = data
 
-    Logger.info("#{client_id}: Sending empty cache")
+    _ = Logger.info("#{client_id}: Sending empty cache")
     # TODO: send empty cache
 
     :keep_state_and_data
@@ -473,7 +482,7 @@ defmodule Astarte.Device do
       client_id: client_id
     } = data
 
-    Logger.info("#{client_id}: Sending producer properties")
+    _ = Logger.info("#{client_id}: Sending producer properties")
     # TODO: build and send producer properties
 
     :keep_state_and_data
@@ -481,7 +490,7 @@ defmodule Astarte.Device do
 
   def connected(:cast, {:connection_status, :down}, %Data{client_id: client_id} = data) do
     # Tortoise will reconnect for us, just go to the :connecting state
-    Logger.info("#{client_id}: Disconnected. Retrying connection...")
+    _ = Logger.info("#{client_id}: Disconnected. Retrying connection...")
 
     {:next_state, :connecting, data}
   end

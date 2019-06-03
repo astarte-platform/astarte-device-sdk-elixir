@@ -30,7 +30,9 @@ defmodule Astarte.Device.InterfaceProvider do
 
   The callback can also return `{:error, reason}` if its fails.
   """
-  @callback init(args :: term()) :: {:ok, state :: InterfaceProvider.state()} | {:error, reason :: term()}
+  @callback init(args :: term()) ::
+              {:ok, state :: Astarte.Device.InterfaceProvider.state()}
+              | {:error, reason :: term()}
 
   defmacro __using__(_opts) do
     alias Astarte.Core.Interface
@@ -41,7 +43,9 @@ defmodule Astarte.Device.InterfaceProvider do
       @doc """
       Get the list of all interfaces in the provider.
       """
-      @spec all_interfaces(state :: InterfaceProvider.state()) :: [%Astarte.Core.Interface{}]
+      @spec all_interfaces(state :: Astarte.Device.InterfaceProvider.state()) :: [
+              %Astarte.Core.Interface{}
+            ]
       def all_interfaces(state) when is_map(state) do
         Map.values(state)
       end
@@ -52,16 +56,16 @@ defmodule Astarte.Device.InterfaceProvider do
 
       Returns `{:ok, %Interface{}}` if the interface is found, `:error` if it's not.
       """
-      @spec fetch_interface(name :: String.t(), state :: InterfaceProvider.state()) ::
-              {:ok, %Astarte.Core.Interface{}} | :not_found
+      @spec fetch_interface(name :: String.t(), state :: Astarte.Device.InterfaceProvider.state()) ::
+              {:ok, %Astarte.Core.Interface{}} | :error
       def fetch_interface(name, state) when is_binary(name) and is_map(state) do
-        Map.fetch(name, state)
+        Map.fetch(state, name)
       end
 
       @doc """
       Get the list of all device owned interfaces in the provider.
       """
-      @spec device_owned_interfaces(state :: InterfaceProvider.state()) ::
+      @spec device_owned_interfaces(state :: Astarte.Device.InterfaceProvider.state()) ::
               [%Astarte.Core.Interface{}]
       def device_owned_interfaces(state) when is_map(state) do
         for {_name, %Interface{ownership: :device} = interface} <- state do
@@ -72,7 +76,7 @@ defmodule Astarte.Device.InterfaceProvider do
       @doc """
       Get the list of all server owned interfaces in the provider.
       """
-      @spec server_owned_interfaces(state :: InterfaceProvider.state()) ::
+      @spec server_owned_interfaces(state :: Astarte.Device.InterfaceProvider.state()) ::
               [%Astarte.Core.Interface{}]
       def server_owned_interfaces(state) when is_map(state) do
         for {_name, %Interface{ownership: :server} = interface} <- state do

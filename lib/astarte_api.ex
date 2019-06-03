@@ -64,7 +64,7 @@ defmodule Astarte.API do
     |> to_map()
   end
 
-  @spec to_map(Tesla.result()) :: Astarte.API.result()
+  @spec to_map(Tesla.Env.result()) :: Astarte.API.result()
   defp to_map({:ok, %Tesla.Env{status: status, headers: headers, body: body}}) do
     {:ok, %{status: status, headers: headers, body: body}}
   end
