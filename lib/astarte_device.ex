@@ -24,6 +24,7 @@ defmodule Astarte.Device do
   @behaviour :gen_statem
 
   require Logger
+  alias Astarte.Core.Interface
 
   # 7 days
   @nearly_expired_seconds 7 * 24 * 60 * 60
@@ -341,7 +342,9 @@ defmodule Astarte.Device do
       broker_url: broker_url,
       ignore_ssl_errors: ignore_ssl_errors,
       credential_storage_mod: credential_storage_mod,
-      credential_storage_state: credential_storage_state
+      credential_storage_state: credential_storage_state,
+      interface_provider_mod: interface_provider_mod,
+      interface_provider_state: interface_provider_state
     } = data
 
     %URI{
@@ -355,6 +358,9 @@ defmodule Astarte.Device do
            credential_storage_mod.fetch(:private_key, credential_storage_state),
          {:ok, pem_certificate} <-
            credential_storage_mod.fetch(:certificate, credential_storage_state) do
+      server_owned_interfaces =
+        interface_provider_mod.server_owned_interfaces(interface_provider_state)
+
       der_certificate =
         pem_certificate
         |> X509.Certificate.from_pem!()
@@ -374,10 +380,13 @@ defmodule Astarte.Device do
         verify: verify
       ]
 
+      subscriptions = build_subscriptions(client_id, server_owned_interfaces)
+
       tortoise_opts = [
         client_id: client_id,
         handler: {Astarte.Device.MqttHandler, device_pid: self()},
-        server: {Tortoise.Transport.SSL, server_opts}
+        server: {Tortoise.Transport.SSL, server_opts},
+        subscriptions: subscriptions
       ]
 
       # TODO: trap exits to catch SSL errors, timeouts etc
@@ -401,6 +410,18 @@ defmodule Astarte.Device do
   def disconnected(:state_timeout, :retry_connect, _data) do
     actions = [{:next_event, :internal, :connect}]
     {:keep_state_and_data, actions}
+  end
+
+  defp build_subscriptions(client_id, server_interfaces) do
+    # Subscriptions are {topic_filter, qos} tuples
+    control_topic_subscription = {"#{client_id}/control/#", 2}
+
+    interface_topic_subscriptions =
+      Enum.flat_map(server_interfaces, fn %Interface{name: interface_name} ->
+        [{"#{client_id}/#{interface_name}", 2}, {"#{client_id}/#{interface_name}/#", 2}]
+      end)
+
+    [control_topic_subscription | interface_topic_subscriptions]
   end
 
   def connecting(:cast, {:connection_status, :up}, %Data{client_id: client_id} = data) do
