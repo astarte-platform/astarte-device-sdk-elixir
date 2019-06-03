@@ -439,11 +439,20 @@ defmodule Astarte.Device do
 
   def connected(:internal, :send_introspection, data) do
     %Data{
-      client_id: client_id
+      client_id: client_id,
+      interface_provider_mod: interface_provider_mod,
+      interface_provider_state: interface_provider_state
     } = data
 
-    Logger.info("#{client_id}: Sending introspection")
-    # TODO: build and send introspection
+    interfaces = interface_provider_mod.all_interfaces(interface_provider_state)
+
+    introspection = build_introspection(interfaces)
+
+    Logger.info("#{client_id}: Sending introspection: #{introspection}")
+
+    # Introspection topic is the same as client_id
+    topic = client_id
+    :ok = Tortoise.publish_sync(client_id, topic, introspection, qos: 2)
 
     :keep_state_and_data
   end
@@ -479,5 +488,12 @@ defmodule Astarte.Device do
 
   def connected(_event_type, _event, _data) do
     :keep_state_and_data
+  end
+
+  defp build_introspection(interfaces) do
+    for %Interface{name: interface_name, major_version: major, minor_version: minor} <- interfaces do
+      "#{interface_name}:#{major}:#{minor}"
+    end
+    |> Enum.join(";")
   end
 end
