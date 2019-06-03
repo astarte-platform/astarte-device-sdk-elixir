@@ -24,6 +24,7 @@ defmodule Astarte.Device do
   @behaviour :gen_statem
 
   require Logger
+  alias Astarte.Core.Interface
 
   # 7 days
   @nearly_expired_seconds 7 * 24 * 60 * 60
@@ -42,7 +43,9 @@ defmodule Astarte.Device do
       :mqtt_connection,
       :ignore_ssl_errors,
       :credential_storage_mod,
-      :credential_storage_state
+      :credential_storage_state,
+      :interface_provider_mod,
+      :interface_provider_state
     ]
   end
 
@@ -66,6 +69,7 @@ defmodule Astarte.Device do
                | {:device_id, String.t()}
                | {:credentials_secret, String.t()}
                | {:credential_storage, {module(), term()}}
+               | {:interface_provider, {module(), term()}}
                | {:ignore_ssl_errors, boolean()},
              device_options: [device_option]
   def start_link(device_options) do
@@ -79,27 +83,41 @@ defmodule Astarte.Device do
     {credential_storage_mod, credential_storage_args} =
       Keyword.fetch!(device_options, :credential_storage)
 
-    case apply(credential_storage_mod, :init, [credential_storage_args]) do
-      {:ok, credential_storage_state} ->
-        data = %Data{
-          pairing_url: pairing_url,
-          realm: realm,
-          device_id: device_id,
-          client_id: client_id,
-          credentials_secret: credentials_secret,
-          ignore_ssl_errors: ignore_ssl_errors,
-          credential_storage_mod: credential_storage_mod,
-          credential_storage_state: credential_storage_state
-        }
+    {interface_provider_mod, interface_provider_args} =
+      Keyword.fetch!(device_options, :interface_provider)
 
-        :gen_statem.start_link(__MODULE__, data, [])
+    with {:cred, {:ok, credential_storage_state}} <-
+           {:cred, credential_storage_mod.init(credential_storage_args)},
+         {:interface, {:ok, interface_provider_state}} <-
+           {:interface, interface_provider_mod.init(interface_provider_args)} do
+      data = %Data{
+        pairing_url: pairing_url,
+        realm: realm,
+        device_id: device_id,
+        client_id: client_id,
+        credentials_secret: credentials_secret,
+        ignore_ssl_errors: ignore_ssl_errors,
+        credential_storage_mod: credential_storage_mod,
+        credential_storage_state: credential_storage_state,
+        interface_provider_mod: interface_provider_mod,
+        interface_provider_state: interface_provider_state
+      }
 
-      {:error, reason} ->
+      :gen_statem.start_link(__MODULE__, data, [])
+    else
+      {:cred, {:error, reason}} ->
         Logger.warn(
           "#{client_id}: Can't initialize CredentialStorage for #{client_id}: #{inspect(reason)}"
         )
 
         {:error, :credential_storage_failed}
+
+      {:interface, {:error, reason}} ->
+        Logger.warn(
+          "#{client_id}: Can't initialize InterfaceProvider for #{client_id}: #{inspect(reason)}"
+        )
+
+        {:error, :interface_provider_failed}
     end
   end
 
@@ -114,10 +132,9 @@ defmodule Astarte.Device do
     } = data
 
     with {:keypair, true} <-
-           {:keypair, apply(credential_storage_mod, :has_keypair?, [credential_storage_state])},
+           {:keypair, credential_storage_mod.has_keypair?(credential_storage_state)},
          {:certificate, {:ok, pem_certificate}} <-
-           {:certificate,
-            apply(credential_storage_mod, :fetch, [:certificate, credential_storage_state])},
+           {:certificate, credential_storage_mod.fetch(:certificate, credential_storage_state)},
          {:valid_certificate, true} <-
            {:valid_certificate, valid_certificate?(pem_certificate)} do
       actions = [{:next_event, :internal, :connect}]
@@ -176,13 +193,13 @@ defmodule Astarte.Device do
     pem_private_key = X509.PrivateKey.to_pem(private_key)
 
     with {:ok, with_key_state} <-
-           apply(credential_storage_mod, :save, [
+           credential_storage_mod.save(
              :private_key,
              pem_private_key,
              credential_storage_state
-           ]),
+           ),
          {:ok, with_key_and_csr_state} <-
-           apply(credential_storage_mod, :save, [:csr, pem_csr, with_key_state]) do
+           credential_storage_mod.save(:csr, pem_csr, with_key_state) do
       new_data = %{data | credential_storage_state: with_key_and_csr_state}
       actions = [{:next_event, :internal, :request_certificate}]
 
@@ -218,18 +235,18 @@ defmodule Astarte.Device do
     Logger.info("#{client_id}: Requesting new certificate")
 
     client = Astarte.API.Pairing.client(pairing_url, realm, auth_token: credentials_secret)
-    {:ok, csr} = apply(credential_storage_mod, :fetch, [:csr, credential_storage_state])
+    {:ok, csr} = credential_storage_mod.fetch(:csr, credential_storage_state)
 
     with {:api, {:ok, %{status: 201, body: body}}} <-
            {:api, Astarte.API.Pairing.Devices.get_mqtt_v1_credentials(client, device_id, csr)},
          %{"data" => %{"client_crt" => pem_certificate}} = body,
          {:store, {:ok, new_credential_storage_state}} <-
            {:store,
-            apply(credential_storage_mod, :save, [
+            credential_storage_mod.save(
               :certificate,
               pem_certificate,
               credential_storage_state
-            ])} do
+            )} do
       Logger.info("#{client_id}: Received new certificate")
       new_data = %{data | credential_storage_state: new_credential_storage_state}
       actions = [{:next_event, :internal, :request_info}]
@@ -325,7 +342,9 @@ defmodule Astarte.Device do
       broker_url: broker_url,
       ignore_ssl_errors: ignore_ssl_errors,
       credential_storage_mod: credential_storage_mod,
-      credential_storage_state: credential_storage_state
+      credential_storage_state: credential_storage_state,
+      interface_provider_mod: interface_provider_mod,
+      interface_provider_state: interface_provider_state
     } = data
 
     %URI{
@@ -336,9 +355,12 @@ defmodule Astarte.Device do
     verify = if ignore_ssl_errors, do: :verify_none, else: :verify_peer
 
     with {:ok, pem_private_key} <-
-           apply(credential_storage_mod, :fetch, [:private_key, credential_storage_state]),
+           credential_storage_mod.fetch(:private_key, credential_storage_state),
          {:ok, pem_certificate} <-
-           apply(credential_storage_mod, :fetch, [:certificate, credential_storage_state]) do
+           credential_storage_mod.fetch(:certificate, credential_storage_state) do
+      server_owned_interfaces =
+        interface_provider_mod.server_owned_interfaces(interface_provider_state)
+
       der_certificate =
         pem_certificate
         |> X509.Certificate.from_pem!()
@@ -358,10 +380,13 @@ defmodule Astarte.Device do
         verify: verify
       ]
 
+      subscriptions = build_subscriptions(client_id, server_owned_interfaces)
+
       tortoise_opts = [
         client_id: client_id,
         handler: {Astarte.Device.MqttHandler, device_pid: self()},
-        server: {Tortoise.Transport.SSL, server_opts}
+        server: {Tortoise.Transport.SSL, server_opts},
+        subscriptions: subscriptions
       ]
 
       # TODO: trap exits to catch SSL errors, timeouts etc
@@ -387,6 +412,18 @@ defmodule Astarte.Device do
     {:keep_state_and_data, actions}
   end
 
+  defp build_subscriptions(client_id, server_interfaces) do
+    # Subscriptions are {topic_filter, qos} tuples
+    control_topic_subscription = {"#{client_id}/control/#", 2}
+
+    interface_topic_subscriptions =
+      Enum.flat_map(server_interfaces, fn %Interface{name: interface_name} ->
+        [{"#{client_id}/#{interface_name}", 2}, {"#{client_id}/#{interface_name}/#", 2}]
+      end)
+
+    [control_topic_subscription | interface_topic_subscriptions]
+  end
+
   def connecting(:cast, {:connection_status, :up}, %Data{client_id: client_id} = data) do
     Logger.info("#{client_id}: Connected")
 
@@ -402,11 +439,20 @@ defmodule Astarte.Device do
 
   def connected(:internal, :send_introspection, data) do
     %Data{
-      client_id: client_id
+      client_id: client_id,
+      interface_provider_mod: interface_provider_mod,
+      interface_provider_state: interface_provider_state
     } = data
 
-    Logger.info("#{client_id}: Sending introspection")
-    # TODO: build and send introspection
+    interfaces = interface_provider_mod.all_interfaces(interface_provider_state)
+
+    introspection = build_introspection(interfaces)
+
+    Logger.info("#{client_id}: Sending introspection: #{introspection}")
+
+    # Introspection topic is the same as client_id
+    topic = client_id
+    :ok = Tortoise.publish_sync(client_id, topic, introspection, qos: 2)
 
     :keep_state_and_data
   end
@@ -442,5 +488,12 @@ defmodule Astarte.Device do
 
   def connected(_event_type, _event, _data) do
     :keep_state_and_data
+  end
+
+  defp build_introspection(interfaces) do
+    for %Interface{name: interface_name, major_version: major, minor_version: minor} <- interfaces do
+      "#{interface_name}:#{major}:#{minor}"
+    end
+    |> Enum.join(";")
   end
 end

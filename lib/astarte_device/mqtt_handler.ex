@@ -19,6 +19,7 @@
 defmodule Astarte.Device.MqttHandler do
   @moduledoc false
 
+  require Logger
   use Tortoise.Handler
 
   @impl true
@@ -33,6 +34,12 @@ defmodule Astarte.Device.MqttHandler do
   @impl true
   def connection(status, %{device_pid: device_pid} = state) do
     :gen_statem.cast(device_pid, {:connection_status, status})
+    {:ok, state}
+  end
+
+  @impl true
+  def subscription(status, topic_filter, state) do
+    Logger.info("Subscription on topic #{inspect(topic_filter)} status: #{inspect(status)}")
     {:ok, state}
   end
 end
