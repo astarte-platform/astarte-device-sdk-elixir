@@ -125,8 +125,10 @@ defmodule Astarte.Device do
 
   # Callbacks
 
+  @impl true
   def callback_mode, do: :state_functions
 
+  @impl true
   def init(data) do
     %Data{
       credential_storage_mod: credential_storage_mod,
