@@ -53,7 +53,8 @@ defmodule Astarte.Device.MixProject do
       {:tesla, "~> 1.2"},
       {:tortoise, "~> 0.9"},
       {:x509, "~> 0.5"},
-      {:excoveralls, "~> 0.11.1", only: :test}
+      {:excoveralls, "~> 0.11.1", only: :test},
+      {:dialyzex, "~> 1.2.0", only: :dev}
     ]
   end
 end

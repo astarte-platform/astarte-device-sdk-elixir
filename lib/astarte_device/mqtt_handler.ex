@@ -39,7 +39,7 @@ defmodule Astarte.Device.MqttHandler do
 
   @impl true
   def subscription(status, topic_filter, state) do
-    Logger.info("Subscription on topic #{inspect(topic_filter)} status: #{inspect(status)}")
+    _ = Logger.info("Subscription on topic #{inspect(topic_filter)} status: #{inspect(status)}")
     {:ok, state}
   end
 end

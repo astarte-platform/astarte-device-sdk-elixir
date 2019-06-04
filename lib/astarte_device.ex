@@ -25,6 +25,7 @@ defmodule Astarte.Device do
 
   require Logger
   alias Astarte.Core.Interface
+  alias Astarte.Core.Mapping
 
   # 7 days
   @nearly_expired_seconds 7 * 24 * 60 * 60
@@ -106,25 +107,66 @@ defmodule Astarte.Device do
       :gen_statem.start_link(__MODULE__, data, [])
     else
       {:cred, {:error, reason}} ->
-        Logger.warn(
-          "#{client_id}: Can't initialize CredentialStorage for #{client_id}: #{inspect(reason)}"
-        )
+        _ =
+          Logger.warn(
+            "#{client_id}: Can't initialize CredentialStorage for #{client_id}: #{inspect(reason)}"
+          )
 
         {:error, :credential_storage_failed}
 
       {:interface, {:error, reason}} ->
-        Logger.warn(
-          "#{client_id}: Can't initialize InterfaceProvider for #{client_id}: #{inspect(reason)}"
-        )
+        _ =
+          Logger.warn(
+            "#{client_id}: Can't initialize InterfaceProvider for #{client_id}: #{inspect(reason)}"
+          )
 
         {:error, :interface_provider_failed}
     end
   end
 
+  @doc """
+  Send a datastream value to Astarte.
+
+  This call is blocking and waits for the message to be ACKed at the MQTT level.
+  """
+  @spec send_datastream(
+          pid :: pid(),
+          interface_name :: String.t(),
+          path :: String.t(),
+          value :: term(),
+          opts :: options
+        ) ::
+          :ok
+          | {:error, reason :: term()}
+        when options: [option],
+             option: {:qos, qos :: Tortoise.qos()} | {:timestamp, timestamp :: DateTime.t()}
+  def send_datastream(pid, interface_name, path, value, opts \\ []) do
+    :gen_statem.call(pid, {:send_datastream, interface_name, path, value, opts})
+  end
+
+  @doc """
+  Send a property value to Astarte.
+
+  This call is blocking and waits for the message to be ACKed at the MQTT level.
+  """
+  @spec set_property(
+          pid :: pid(),
+          interface_name :: String.t(),
+          path :: String.t(),
+          value :: term()
+        ) ::
+          :ok
+          | {:error, reason :: term()}
+  def set_property(pid, interface_name, path, value) do
+    :gen_statem.call(pid, {:set_property, interface_name, path, value})
+  end
+
   # Callbacks
 
+  @impl true
   def callback_mode, do: :state_functions
 
+  @impl true
   def init(data) do
     %Data{
       credential_storage_mod: credential_storage_mod,
@@ -180,7 +222,7 @@ defmodule Astarte.Device do
       credential_storage_state: credential_storage_state
     } = data
 
-    Logger.info("#{client_id}: Generating a new keypair")
+    _ = Logger.info("#{client_id}: Generating a new keypair")
 
     # TODO: make crypto configurable (RSA/EC, key size/curve)
     private_key = X509.PrivateKey.new_rsa(@key_size)
@@ -207,9 +249,10 @@ defmodule Astarte.Device do
     else
       {:error, reason} ->
         # TODO: exponential backoff
-        Logger.warn(
-          "#{client_id}: Failed to save keypair to credential storage: #{inspect(reason)}, trying again in 5 seconds"
-        )
+        _ =
+          Logger.warn(
+            "#{client_id}: Failed to save keypair to credential storage: #{inspect(reason)}, trying again in 5 seconds"
+          )
 
         actions = [{:state_timeout, 5000, :retry_generate_keypair}]
         {:keep_state_and_data, actions}
@@ -219,6 +262,10 @@ defmodule Astarte.Device do
   def no_keypair(:state_timeout, :retry_generate_keypair, _data) do
     actions = [{:next_event, :internal, :generate_keypair}]
     {:keep_state_and_data, actions}
+  end
+
+  def no_keypair({:call, from}, _request, _data) do
+    handle_disconnected_publish(from)
   end
 
   def no_certificate(:internal, :request_certificate, data) do
@@ -232,7 +279,7 @@ defmodule Astarte.Device do
       credential_storage_state: credential_storage_state
     } = data
 
-    Logger.info("#{client_id}: Requesting new certificate")
+    _ = Logger.info("#{client_id}: Requesting new certificate")
 
     client = Astarte.API.Pairing.client(pairing_url, realm, auth_token: credentials_secret)
     {:ok, csr} = credential_storage_mod.fetch(:csr, credential_storage_state)
@@ -247,7 +294,7 @@ defmodule Astarte.Device do
               pem_certificate,
               credential_storage_state
             )} do
-      Logger.info("#{client_id}: Received new certificate")
+      _ = Logger.info("#{client_id}: Received new certificate")
       new_data = %{data | credential_storage_state: new_credential_storage_state}
       actions = [{:next_event, :internal, :request_info}]
       {:next_state, :waiting_for_info, new_data, actions}
@@ -255,9 +302,10 @@ defmodule Astarte.Device do
       {:api, {:error, reason}} ->
         # HTTP request can't be made
         # TODO: exponential backoff
-        Logger.warn(
-          "#{client_id}: Failed to ask for a certificate: #{inspect(reason)}. Trying again in 30 seconds"
-        )
+        _ =
+          Logger.warn(
+            "#{client_id}: Failed to ask for a certificate: #{inspect(reason)}. Trying again in 30 seconds"
+          )
 
         actions = [{:state_timeout, 30_000, :retry_request_certificate}]
         {:keep_state_and_data, actions}
@@ -265,18 +313,20 @@ defmodule Astarte.Device do
       {:api, {:ok, %{status: status, body: body}}} ->
         # HTTP request succeeded but returned an error status
         # TODO: pattern match on the status + exponential backoff
-        Logger.warn(
-          "#{client_id}: Get credentials failed with status #{status}: #{inspect(body)}. Trying again in 30 seconds."
-        )
+        _ =
+          Logger.warn(
+            "#{client_id}: Get credentials failed with status #{status}: #{inspect(body)}. Trying again in 30 seconds."
+          )
 
         actions = [{:state_timeout, 30_000, :retry_request_certificate}]
         {:keep_state_and_data, actions}
 
       {:store, {:error, reason}} ->
         # TODO: exponential backoff
-        Logger.warn(
-          "#{client_id}: Credential storage could not save certificate: #{inspect(reason)}. Trying again in 30 seconds."
-        )
+        _ =
+          Logger.warn(
+            "#{client_id}: Credential storage could not save certificate: #{inspect(reason)}. Trying again in 30 seconds."
+          )
 
         actions = [{:state_timeout, 30_000, :retry_request_certificate}]
         {:keep_state_and_data, actions}
@@ -288,6 +338,10 @@ defmodule Astarte.Device do
     {:keep_state_and_data, actions}
   end
 
+  def no_certificate({:call, from}, _request, _data) do
+    handle_disconnected_publish(from)
+  end
+
   def waiting_for_info(:internal, :request_info, data) do
     %Data{
       client_id: client_id,
@@ -297,14 +351,14 @@ defmodule Astarte.Device do
       device_id: device_id
     } = data
 
-    Logger.info("#{client_id}: Requesting info")
+    _ = Logger.info("#{client_id}: Requesting info")
 
     client = Astarte.API.Pairing.client(pairing_url, realm, auth_token: credentials_secret)
 
     with {:ok, %{status: 200, body: body}} <- Astarte.API.Pairing.Devices.info(client, device_id),
          broker_url when not is_nil(broker_url) <-
            get_in(body, ["data", "protocols", "astarte_mqtt_v1", "broker_url"]) do
-      Logger.info("#{client_id}: Broker url is #{broker_url}")
+      _ = Logger.info("#{client_id}: Broker url is #{broker_url}")
       new_data = %{data | broker_url: broker_url}
       actions = [{:next_event, :internal, :connect}]
       {:next_state, :disconnected, new_data, actions}
@@ -312,9 +366,10 @@ defmodule Astarte.Device do
       {:error, reason} ->
         # HTTP request can't be made
         # TODO: exponential backoff
-        Logger.warn(
-          "#{client_id}: Failed to obtain transport info: #{inspect(reason)}. Trying again in 30 seconds"
-        )
+        _ =
+          Logger.warn(
+            "#{client_id}: Failed to obtain transport info: #{inspect(reason)}. Trying again in 30 seconds"
+          )
 
         actions = [{:state_timeout, 30_000, :retry_request_info}]
         {:keep_state_and_data, actions}
@@ -322,9 +377,10 @@ defmodule Astarte.Device do
       {:ok, %{status: status, body: body}} ->
         # HTTP request succeeded but returned an error status
         # TODO: pattern match on the status + exponential backoff
-        Logger.warn(
-          "#{client_id}: Get info failed with status #{status}: #{inspect(body)}. Trying again in 30 seconds."
-        )
+        _ =
+          Logger.warn(
+            "#{client_id}: Get info failed with status #{status}: #{inspect(body)}. Trying again in 30 seconds."
+          )
 
         actions = [{:state_timeout, 30_000, :retry_request_info}]
         {:keep_state_and_data, actions}
@@ -334,6 +390,10 @@ defmodule Astarte.Device do
   def waiting_for_info(:state_timeout, :retry_request_info, _data) do
     actions = [{:next_event, :internal, :request_info}]
     {:keep_state_and_data, actions}
+  end
+
+  def waiting_for_info({:call, from}, _request, _data) do
+    handle_disconnected_publish(from)
   end
 
   def disconnected(:internal, :connect, data) do
@@ -396,9 +456,10 @@ defmodule Astarte.Device do
           {:next_state, :connecting, new_data}
 
         {:error, reason} ->
-          Logger.warn(
-            "#{client_id}: failed to connect: #{inspect(reason)}. Trying again in 30 seconds."
-          )
+          _ =
+            Logger.warn(
+              "#{client_id}: failed to connect: #{inspect(reason)}. Trying again in 30 seconds."
+            )
 
           # TODO: exponential backoff
           actions = [{:state_timeout, :retry_connect, 30_000}]
@@ -410,6 +471,10 @@ defmodule Astarte.Device do
   def disconnected(:state_timeout, :retry_connect, _data) do
     actions = [{:next_event, :internal, :connect}]
     {:keep_state_and_data, actions}
+  end
+
+  def disconnected({:call, from}, _request, _data) do
+    handle_disconnected_publish(from)
   end
 
   defp build_subscriptions(client_id, server_interfaces) do
@@ -425,7 +490,7 @@ defmodule Astarte.Device do
   end
 
   def connecting(:cast, {:connection_status, :up}, %Data{client_id: client_id} = data) do
-    Logger.info("#{client_id}: Connected")
+    _ = Logger.info("#{client_id}: Connected")
 
     # TODO: we always send empty cache and producer properties for now since we can't access the session_present flag
     actions = [
@@ -435,6 +500,10 @@ defmodule Astarte.Device do
     ]
 
     {:next_state, :connected, data, actions}
+  end
+
+  def connecting({:call, from}, _request, _data) do
+    handle_disconnected_publish(from)
   end
 
   def connected(:internal, :send_introspection, data) do
@@ -448,7 +517,7 @@ defmodule Astarte.Device do
 
     introspection = build_introspection(interfaces)
 
-    Logger.info("#{client_id}: Sending introspection: #{introspection}")
+    _ = Logger.info("#{client_id}: Sending introspection: #{introspection}")
 
     # Introspection topic is the same as client_id
     topic = client_id
@@ -462,7 +531,7 @@ defmodule Astarte.Device do
       client_id: client_id
     } = data
 
-    Logger.info("#{client_id}: Sending empty cache")
+    _ = Logger.info("#{client_id}: Sending empty cache")
     # TODO: send empty cache
 
     :keep_state_and_data
@@ -473,7 +542,7 @@ defmodule Astarte.Device do
       client_id: client_id
     } = data
 
-    Logger.info("#{client_id}: Sending producer properties")
+    _ = Logger.info("#{client_id}: Sending producer properties")
     # TODO: build and send producer properties
 
     :keep_state_and_data
@@ -481,13 +550,146 @@ defmodule Astarte.Device do
 
   def connected(:cast, {:connection_status, :down}, %Data{client_id: client_id} = data) do
     # Tortoise will reconnect for us, just go to the :connecting state
-    Logger.info("#{client_id}: Disconnected. Retrying connection...")
+    _ = Logger.info("#{client_id}: Disconnected. Retrying connection...")
 
     {:next_state, :connecting, data}
   end
 
+  def connected({:call, from}, {:send_datastream, interface_name, path, value, opts}, data) do
+    publish_params = %{
+      publish_type: :datastream,
+      interface_name: interface_name,
+      path: path,
+      value: value,
+      opts: opts
+    }
+
+    reply = handle_publish(publish_params, data)
+    actions = [{:reply, from, reply}]
+    {:keep_state_and_data, actions}
+  end
+
+  def connected({:call, from}, {:set_property, interface_name, path, value}, data) do
+    publish_params = %{
+      publish_type: :properties,
+      interface_name: interface_name,
+      path: path,
+      value: value,
+      opts: [qos: 2]
+    }
+
+    reply = handle_publish(publish_params, data)
+    actions = [{:reply, from, reply}]
+    {:keep_state_and_data, actions}
+  end
+
   def connected(_event_type, _event, _data) do
     :keep_state_and_data
+  end
+
+  def handle_disconnected_publish(from) do
+    actions = [{:reply, from, {:error, :device_disconnected}}]
+    {:keep_state_and_data, actions}
+  end
+
+  def handle_publish(publish_params, data) do
+    %{
+      publish_type: publish_type,
+      interface_name: interface_name,
+      path: path,
+      value: value,
+      opts: opts
+    } = publish_params
+
+    %Data{
+      client_id: client_id,
+      interface_provider_mod: interface_provider_mod,
+      interface_provider_state: interface_provider_state
+    } = data
+
+    with {:ok, %Interface{type: ^publish_type} = interface} <-
+           interface_provider_mod.fetch_interface(interface_name, interface_provider_state) do
+      publish(client_id, interface, path, value, opts)
+    else
+      :error ->
+        _ =
+          Logger.warn(
+            "#{client_id}: Trying to publish to not-existing interface #{interface_name}. Ignoring."
+          )
+
+        {:error, :interface_not_found}
+
+      # We weren't expecting properties, so we came from send_datastream
+      {:ok, %Interface{type: :properties}} ->
+        _ =
+          Logger.warn("#{client_id}: send_datastream on properties interface: #{interface_name}")
+
+        {:error, :properties_interface}
+
+      # We weren't expecting datastream, so we came from set_property
+      {:ok, %Interface{type: :datastream}} ->
+        _ = Logger.warn("#{client_id}: set_property on datastream interface: #{interface_name}")
+
+        {:error, :properties_interface}
+    end
+  end
+
+  defp publish(client_id, interface, path, value, opts) do
+    # TODO:
+    # - Handle empty payload (check allow_unset)
+    # - Enforce timestamps if explicit_timestamp is true
+    # - Check aggregation
+
+    %Interface{
+      name: interface_name
+    } = interface
+
+    with %Interface{ownership: :device, mappings: mappings} <- interface,
+         {:ok, %Mapping{value_type: expected_type}} <- find_mapping(path, mappings),
+         :ok <- Mapping.ValueType.validate_value(expected_type, value),
+         payload_map = build_payload_map(value, opts),
+         {:ok, bson_payload} <- Cyanide.encode(payload_map) do
+      publish_opts = Keyword.take(opts, [:qos])
+
+      topic = Path.join([client_id, interface_name, path])
+
+      Tortoise.publish_sync(client_id, topic, bson_payload, publish_opts)
+    else
+      %Interface{ownership: :server} ->
+        _ =
+          Logger.warn(
+            "#{client_id}: Trying to publish to server-owned interface #{interface_name}"
+          )
+
+        {:error, :server_owned_interface}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp find_mapping(path, mappings) do
+    with {:ok, endpoint_automaton} <- Mapping.EndpointsAutomaton.build(mappings),
+         {:ok, endpoint} <- Mapping.EndpointsAutomaton.resolve_path(path, endpoint_automaton),
+         %Mapping{} = mapping <-
+           Enum.find(mappings, fn %Mapping{} = mapping ->
+             mapping.endpoint == endpoint
+           end) do
+      {:ok, mapping}
+    else
+      _ ->
+        {:error, :cannot_resolve_path}
+    end
+  end
+
+  defp build_payload_map(value, opts) do
+    case Keyword.fetch(opts, :timestamp) do
+      {:ok, %DateTime{} = timestamp} ->
+        %{v: value, t: timestamp}
+
+      _ ->
+        %{v: value}
+    end
   end
 
   defp build_introspection(interfaces) do

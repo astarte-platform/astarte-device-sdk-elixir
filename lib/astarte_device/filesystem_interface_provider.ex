@@ -77,11 +77,11 @@ defmodule Astarte.Device.FilesystemInterfaceProvider do
       {:ok, interface}
     else
       {:error, %Ecto.Changeset{errors: errors}} ->
-        Logger.warn("Invalid interface #{file_path}: #{inspect(errors)}")
+        _ = Logger.warn("Invalid interface #{file_path}: #{inspect(errors)}")
         :error
 
       {:error, reason} ->
-        Logger.warn("Problem loading interface #{file_path}: #{inspect(reason)}")
+        _ = Logger.warn("Problem loading interface #{file_path}: #{inspect(reason)}")
         :error
     end
   end
