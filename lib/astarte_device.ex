@@ -264,6 +264,10 @@ defmodule Astarte.Device do
     {:keep_state_and_data, actions}
   end
 
+  def no_keypair({:call, from}, _request, _data) do
+    handle_disconnected_publish(from)
+  end
+
   def no_certificate(:internal, :request_certificate, data) do
     %Data{
       client_id: client_id,
@@ -334,6 +338,10 @@ defmodule Astarte.Device do
     {:keep_state_and_data, actions}
   end
 
+  def no_certificate({:call, from}, _request, _data) do
+    handle_disconnected_publish(from)
+  end
+
   def waiting_for_info(:internal, :request_info, data) do
     %Data{
       client_id: client_id,
@@ -382,6 +390,10 @@ defmodule Astarte.Device do
   def waiting_for_info(:state_timeout, :retry_request_info, _data) do
     actions = [{:next_event, :internal, :request_info}]
     {:keep_state_and_data, actions}
+  end
+
+  def waiting_for_info({:call, from}, _request, _data) do
+    handle_disconnected_publish(from)
   end
 
   def disconnected(:internal, :connect, data) do
@@ -461,6 +473,10 @@ defmodule Astarte.Device do
     {:keep_state_and_data, actions}
   end
 
+  def disconnected({:call, from}, _request, _data) do
+    handle_disconnected_publish(from)
+  end
+
   defp build_subscriptions(client_id, server_interfaces) do
     # Subscriptions are {topic_filter, qos} tuples
     control_topic_subscription = {"#{client_id}/control/#", 2}
@@ -484,6 +500,10 @@ defmodule Astarte.Device do
     ]
 
     {:next_state, :connected, data, actions}
+  end
+
+  def connecting({:call, from}, _request, _data) do
+    handle_disconnected_publish(from)
   end
 
   def connected(:internal, :send_introspection, data) do
@@ -565,6 +585,11 @@ defmodule Astarte.Device do
 
   def connected(_event_type, _event, _data) do
     :keep_state_and_data
+  end
+
+  def handle_disconnected_publish(from) do
+    actions = [{:reply, from, {:error, :device_disconnected}}]
+    {:keep_state_and_data, actions}
   end
 
   def handle_publish(publish_params, data) do
