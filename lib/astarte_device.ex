@@ -87,7 +87,9 @@ defmodule Astarte.Device do
     {interface_provider_mod, interface_provider_args} =
       Keyword.fetch!(device_options, :interface_provider)
 
-    with {:cred, {:ok, credential_storage_state}} <-
+    with {:device_id, {:ok, _decoded_device_id}} <-
+           {:device_id, Astarte.Core.Device.decode_device_id(device_id)},
+         {:cred, {:ok, credential_storage_state}} <-
            {:cred, credential_storage_mod.init(credential_storage_args)},
          {:interface, {:ok, interface_provider_state}} <-
            {:interface, interface_provider_mod.init(interface_provider_args)} do
@@ -106,6 +108,11 @@ defmodule Astarte.Device do
 
       :gen_statem.start_link(__MODULE__, data, [])
     else
+      {:device_id, _} ->
+        _ = Logger.warn("#{client_id}: Invalid device_id: #{device_id}")
+
+        {:error, :invalid_device_id}
+
       {:cred, {:error, reason}} ->
         _ =
           Logger.warn(
