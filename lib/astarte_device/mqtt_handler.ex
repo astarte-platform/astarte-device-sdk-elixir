@@ -42,4 +42,10 @@ defmodule Astarte.Device.MqttHandler do
     _ = Logger.info("Subscription on topic #{inspect(topic_filter)} status: #{inspect(status)}")
     {:ok, state}
   end
+
+  @impl true
+  def handle_message(topic_levels, payload, %{device_pid: device_pid} = state) do
+    :gen_statem.cast(device_pid, {:msg, topic_levels, payload})
+    {:ok, state}
+  end
 end

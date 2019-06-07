@@ -46,7 +46,10 @@ defmodule Astarte.Device do
       :credential_storage_mod,
       :credential_storage_state,
       :interface_provider_mod,
-      :interface_provider_state
+      :interface_provider_state,
+      :handler_mod,
+      :handler_args,
+      :handler_pid
     ]
   end
 
@@ -60,8 +63,10 @@ defmodule Astarte.Device do
     * `realm` - Realm which the device belongs to.
     * `device_id` - Device ID of the device. The device ID must be 128-bit long and must be encoded with url-safe base64 without padding. You can generate a random one with `:crypto.strong_rand_bytes(16) |> Base.url_encode64(padding: false)`.
     * `credentials_secret` - The credentials secret obtained when registering the device using Pairing API (to register a device use `Astarte.API.Pairing.Agent.register_device/2` or see https://docs.astarte-platform.org/latest/api/index.html?urls.primaryName=Pairing%20API#/agent/registerDevice).
-    * `credential_storage` - A tuple `{module, args}` where `module` is a module implementing `Astarte.Device.CredentialStorage` behaviour and `args` are the arguments passed to its init function
-    * `ignore_ssl_errors` - Defaults to `false`, if `true` the device will ignore SSL errors during connection. Useful if you're using the Device to connect to a test instance of Astarte with self signed certificates, it is not recommended to leave this `true` in production.
+    * `interface_provider` - A tuple `{module, args}` where `module` is a module implementing `Astarte.Device.InterfaceProvider` behaviour and `args` are the arguments passed to its init function. It's also possible to pass a path containing the JSON interfaces the device will use, and that path will be passed to `Astarte.Device.FilesystemInterfaceProvider`.
+    * `credential_storage` (optional) - A tuple `{module, args}` where `module` is a module implementing `Astarte.Device.CredentialStorage` behaviour and `args` are the arguments passed to its init function. If not provided, `Astarte.Device.InMemoryStorage` will be used.
+    * `handler` (optional) - A tuple `{module, args}` where `module` is a module implementing `Astarte.Device.Handler` behaviour and `args` are the arguments passed to its `init_state` function. If not provided, `Astarte.Device.DefaultHandler` will be used.
+    * `ignore_ssl_errors` (optional) - Defaults to `false`, if `true` the device will ignore SSL errors during connection. Useful if you're using the Device to connect to a test instance of Astarte with self signed certificates, it is not recommended to leave this `true` in production.
   """
   @spec start_link(device_options) :: :gen_statem.start_ret()
         when device_option:
@@ -70,7 +75,8 @@ defmodule Astarte.Device do
                | {:device_id, String.t()}
                | {:credentials_secret, String.t()}
                | {:credential_storage, {module(), term()}}
-               | {:interface_provider, {module(), term()}}
+               | {:interface_provider, {module(), term()} | String.t()}
+               | {:handler, {module(), term()}}
                | {:ignore_ssl_errors, boolean()},
              device_options: [device_option]
   def start_link(device_options) do
@@ -82,12 +88,23 @@ defmodule Astarte.Device do
     ignore_ssl_errors = Keyword.get(device_options, :ignore_ssl_errors, false)
 
     {credential_storage_mod, credential_storage_args} =
-      Keyword.fetch!(device_options, :credential_storage)
+      Keyword.get(device_options, :credential_storage, {Astarte.Device.InMemoryStorage, []})
 
     {interface_provider_mod, interface_provider_args} =
-      Keyword.fetch!(device_options, :interface_provider)
+      case Keyword.fetch!(device_options, :interface_provider) do
+        {mod, args} when is_atom(mod) ->
+          {mod, args}
 
-    with {:cred, {:ok, credential_storage_state}} <-
+        path when is_binary(path) ->
+          {Astarte.Device.FilesystemInterfaceProvider, path: path}
+      end
+
+    {handler_mod, handler_args} =
+      Keyword.get(device_options, :handler, {Astarte.Device.DefaultHandler, []})
+
+    with {:device_id, {:ok, _decoded_device_id}} <-
+           {:device_id, Astarte.Core.Device.decode_device_id(device_id)},
+         {:cred, {:ok, credential_storage_state}} <-
            {:cred, credential_storage_mod.init(credential_storage_args)},
          {:interface, {:ok, interface_provider_state}} <-
            {:interface, interface_provider_mod.init(interface_provider_args)} do
@@ -101,11 +118,18 @@ defmodule Astarte.Device do
         credential_storage_mod: credential_storage_mod,
         credential_storage_state: credential_storage_state,
         interface_provider_mod: interface_provider_mod,
-        interface_provider_state: interface_provider_state
+        interface_provider_state: interface_provider_state,
+        handler_mod: handler_mod,
+        handler_args: handler_args
       }
 
       :gen_statem.start_link(__MODULE__, data, [])
     else
+      {:device_id, _} ->
+        _ = Logger.warn("#{client_id}: Invalid device_id: #{device_id}")
+
+        {:error, :invalid_device_id}
+
       {:cred, {:error, reason}} ->
         _ =
           Logger.warn(
@@ -170,8 +194,23 @@ defmodule Astarte.Device do
   def init(data) do
     %Data{
       credential_storage_mod: credential_storage_mod,
-      credential_storage_state: credential_storage_state
+      credential_storage_state: credential_storage_state,
+      realm: realm,
+      device_id: device_id,
+      handler_mod: handler_mod,
+      handler_args: handler_args
     } = data
+
+    handler_full_args = [
+      realm: realm,
+      device_id: device_id,
+      user_args: handler_args
+    ]
+
+    # TODO: this should probably go in a supervision tree with the Device
+    {:ok, handler_pid} = handler_mod.start_link(handler_full_args)
+
+    new_data = %{data | handler_pid: handler_pid}
 
     with {:keypair, true} <-
            {:keypair, credential_storage_mod.has_keypair?(credential_storage_state)},
@@ -180,18 +219,18 @@ defmodule Astarte.Device do
          {:valid_certificate, true} <-
            {:valid_certificate, valid_certificate?(pem_certificate)} do
       actions = [{:next_event, :internal, :connect}]
-      {:ok, :disconnected, data, actions}
+      {:ok, :disconnected, new_data, actions}
     else
       {:keypair, false} ->
         actions = [{:next_event, :internal, :generate_keypair}]
-        {:ok, :no_keypair, data, actions}
+        {:ok, :no_keypair, new_data, actions}
 
       {:certificate, :error} ->
-        {:ok, :no_certificate, data}
+        {:ok, :no_certificate, new_data}
 
       {:valid_certificate, false} ->
         # If the certificate is invalid, we treat it like it's not there
-        {:ok, :no_certificate, data}
+        {:ok, :no_certificate, new_data}
 
       {:error, reason} ->
         {:stop, reason}
@@ -555,6 +594,30 @@ defmodule Astarte.Device do
     {:next_state, :connecting, data}
   end
 
+  def connected(:cast, {:msg, topic_tokens, payload}, data) do
+    %Data{
+      client_id: client_id,
+      realm: realm,
+      device_id: device_id
+    } = data
+
+    case topic_tokens do
+      [^realm, ^device_id, "control" | control_path_tokens] ->
+        handle_control_message(control_path_tokens, payload, data)
+
+      [^realm, ^device_id, interface_name | path_tokens] ->
+        handle_data_message(interface_name, path_tokens, payload, data)
+
+      other_topic_tokens ->
+        _ =
+          Logger.warn(
+            "#{client_id}: received message on unhandled topic #{Path.join(other_topic_tokens)}"
+          )
+
+        :keep_state_and_data
+    end
+  end
+
   def connected({:call, from}, {:send_datastream, interface_name, path, value, opts}, data) do
     publish_params = %{
       publish_type: :datastream,
@@ -587,12 +650,75 @@ defmodule Astarte.Device do
     :keep_state_and_data
   end
 
-  def handle_disconnected_publish(from) do
+  defp handle_control_message(control_path_tokens, payload, data) do
+    %Data{
+      client_id: client_id
+    } = data
+
+    # TODO: handle control messages
+    _ =
+      Logger.info(
+        "#{client_id}: received control message, control_path_tokens=#{
+          inspect(control_path_tokens)
+        }, payload=#{inspect(payload)}"
+      )
+
+    :keep_state_and_data
+  end
+
+  defp handle_data_message(interface_name, path_tokens, payload, data) do
+    %Data{
+      client_id: client_id,
+      interface_provider_mod: interface_provider_mod,
+      interface_provider_state: interface_provider_state,
+      handler_pid: handler_pid
+    } = data
+
+    path = "/" <> Path.join(path_tokens)
+
+    # TODO: persist the message to avoid losing it in case of a crash
+
+    with {:ok, %Interface{ownership: :server, mappings: mappings}} <-
+           interface_provider_mod.fetch_interface(interface_name, interface_provider_state),
+         {:ok, %Mapping{value_type: expected_type}} <- find_mapping(path, mappings),
+         {:ok, %{"v" => value} = decoded_map} <- Cyanide.decode(payload),
+         timestamp = Map.get(decoded_map, "t"),
+         :ok <- Mapping.ValueType.validate_value(expected_type, value) do
+      request = {:msg, interface_name, path_tokens, value, timestamp}
+      :ok = GenServer.cast(handler_pid, request)
+      :keep_state_and_data
+    else
+      :error ->
+        _ = Logger.warn("#{client_id}: interface not found on incoming data: #{interface_name}")
+
+        :keep_state_and_data
+
+      {:ok, %Interface{ownership: :device}} ->
+        _ =
+          Logger.warn(
+            "#{client_id}: incoming data on device owned interface: #{interface_name} #{path}"
+          )
+
+        :keep_state_and_data
+
+      {:error, reason} ->
+        _ =
+          Logger.warn(
+            "#{client_id}: error in handle_data_message on #{interface_name} #{path}: #{
+              inspect(reason)
+            }"
+          )
+
+        :keep_state_and_data
+    end
+  end
+
+  defp handle_disconnected_publish(from) do
     actions = [{:reply, from, {:error, :device_disconnected}}]
     {:keep_state_and_data, actions}
   end
 
-  def handle_publish(publish_params, data) do
+  defp handle_publish(publish_params, data) do
     %{
       publish_type: publish_type,
       interface_name: interface_name,
