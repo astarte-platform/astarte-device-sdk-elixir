@@ -63,8 +63,10 @@ defmodule Astarte.Device do
     * `realm` - Realm which the device belongs to.
     * `device_id` - Device ID of the device. The device ID must be 128-bit long and must be encoded with url-safe base64 without padding. You can generate a random one with `:crypto.strong_rand_bytes(16) |> Base.url_encode64(padding: false)`.
     * `credentials_secret` - The credentials secret obtained when registering the device using Pairing API (to register a device use `Astarte.API.Pairing.Agent.register_device/2` or see https://docs.astarte-platform.org/latest/api/index.html?urls.primaryName=Pairing%20API#/agent/registerDevice).
-    * `credential_storage` - A tuple `{module, args}` where `module` is a module implementing `Astarte.Device.CredentialStorage` behaviour and `args` are the arguments passed to its init function
-    * `ignore_ssl_errors` - Defaults to `false`, if `true` the device will ignore SSL errors during connection. Useful if you're using the Device to connect to a test instance of Astarte with self signed certificates, it is not recommended to leave this `true` in production.
+    * `interface_provider` - A tuple `{module, args}` where `module` is a module implementing `Astarte.Device.InterfaceProvider` behaviour and `args` are the arguments passed to its init function. It's also possible to pass a path containing the JSON interfaces the device will use, and that path will be passed to `Astarte.Device.FilesystemInterfaceProvider`.
+    * `credential_storage` (optional) - A tuple `{module, args}` where `module` is a module implementing `Astarte.Device.CredentialStorage` behaviour and `args` are the arguments passed to its init function. If not provided, `Astarte.Device.InMemoryStorage` will be used.
+    * `handler` (optional) - A tuple `{module, args}` where `module` is a module implementing `Astarte.Device.Handler` behaviour and `args` are the arguments passed to its `init_state` function. If not provided, `Astarte.Device.DefaultHandler` will be used.
+    * `ignore_ssl_errors` (optional) - Defaults to `false`, if `true` the device will ignore SSL errors during connection. Useful if you're using the Device to connect to a test instance of Astarte with self signed certificates, it is not recommended to leave this `true` in production.
   """
   @spec start_link(device_options) :: :gen_statem.start_ret()
         when device_option:
@@ -73,7 +75,7 @@ defmodule Astarte.Device do
                | {:device_id, String.t()}
                | {:credentials_secret, String.t()}
                | {:credential_storage, {module(), term()}}
-               | {:interface_provider, {module(), term()}}
+               | {:interface_provider, {module(), term()} | String.t()}
                | {:handler, {module(), term()}}
                | {:ignore_ssl_errors, boolean()},
              device_options: [device_option]
@@ -86,10 +88,16 @@ defmodule Astarte.Device do
     ignore_ssl_errors = Keyword.get(device_options, :ignore_ssl_errors, false)
 
     {credential_storage_mod, credential_storage_args} =
-      Keyword.fetch!(device_options, :credential_storage)
+      Keyword.get(device_options, :credential_storage, {Astarte.Device.InMemoryStorage, []})
 
     {interface_provider_mod, interface_provider_args} =
-      Keyword.fetch!(device_options, :interface_provider)
+      case Keyword.fetch!(device_options, :interface_provider) do
+        {mod, args} when is_atom(mod) ->
+          {mod, args}
+
+        path when is_binary(path) ->
+          {Astarte.Device.FilesystemInterfaceProvider, path: path}
+      end
 
     {handler_mod, handler_args} =
       Keyword.get(device_options, :handler, {Astarte.Device.DefaultHandler, []})
