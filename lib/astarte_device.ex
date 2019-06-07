@@ -586,6 +586,30 @@ defmodule Astarte.Device do
     {:next_state, :connecting, data}
   end
 
+  def connected(:cast, {:msg, topic_tokens, payload}, data) do
+    %Data{
+      client_id: client_id,
+      realm: realm,
+      device_id: device_id
+    } = data
+
+    case topic_tokens do
+      [^realm, ^device_id, "control" | control_path_tokens] ->
+        handle_control_message(control_path_tokens, payload, data)
+
+      [^realm, ^device_id, interface_name | path_tokens] ->
+        handle_data_message(interface_name, path_tokens, payload, data)
+
+      other_topic_tokens ->
+        _ =
+          Logger.warn(
+            "#{client_id}: received message on unhandled topic #{Path.join(other_topic_tokens)}"
+          )
+
+        :keep_state_and_data
+    end
+  end
+
   def connected({:call, from}, {:send_datastream, interface_name, path, value, opts}, data) do
     publish_params = %{
       publish_type: :datastream,
@@ -616,6 +640,69 @@ defmodule Astarte.Device do
 
   def connected(_event_type, _event, _data) do
     :keep_state_and_data
+  end
+
+  defp handle_control_message(control_path_tokens, payload, data) do
+    %Data{
+      client_id: client_id
+    } = data
+
+    # TODO: handle control messages
+    _ =
+      Logger.info(
+        "#{client_id}: received control message, control_path_tokens=#{
+          inspect(control_path_tokens)
+        }, payload=#{inspect(payload)}"
+      )
+
+    :keep_state_and_data
+  end
+
+  defp handle_data_message(interface_name, path_tokens, payload, data) do
+    %Data{
+      client_id: client_id,
+      interface_provider_mod: interface_provider_mod,
+      interface_provider_state: interface_provider_state,
+      handler_pid: handler_pid
+    } = data
+
+    path = "/" <> Path.join(path_tokens)
+
+    # TODO: persist the message to avoid losing it in case of a crash
+
+    with {:ok, %Interface{ownership: :server, mappings: mappings}} <-
+           interface_provider_mod.fetch_interface(interface_name, interface_provider_state),
+         {:ok, %Mapping{value_type: expected_type}} <- find_mapping(path, mappings),
+         {:ok, %{"v" => value} = decoded_map} <- Cyanide.decode(payload),
+         timestamp = Map.get(decoded_map, "t"),
+         :ok <- Mapping.ValueType.validate_value(expected_type, value) do
+      request = {:msg, interface_name, path_tokens, value, timestamp}
+      :ok = GenServer.cast(handler_pid, request)
+      :keep_state_and_data
+    else
+      :error ->
+        _ = Logger.warn("#{client_id}: interface not found on incoming data: #{interface_name}")
+
+        :keep_state_and_data
+
+      {:ok, %Interface{ownership: :device}} ->
+        _ =
+          Logger.warn(
+            "#{client_id}: incoming data on device owned interface: #{interface_name} #{path}"
+          )
+
+        :keep_state_and_data
+
+      {:error, reason} ->
+        _ =
+          Logger.warn(
+            "#{client_id}: error in handle_data_message on #{interface_name} #{path}: #{
+              inspect(reason)
+            }"
+          )
+
+        :keep_state_and_data
+    end
   end
 
   defp handle_disconnected_publish(from) do
