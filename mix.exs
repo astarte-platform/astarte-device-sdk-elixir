@@ -32,7 +32,8 @@ defmodule Astarte.Device.MixProject do
         "coveralls.post": :test,
         "coveralls.html": :test
       ],
-      deps: deps()
+      deps: deps(),
+      dialyzer_ignored_warnings: dialyzer_ignored_warnings()
     ]
   end
 
@@ -55,6 +56,13 @@ defmodule Astarte.Device.MixProject do
       {:x509, "~> 0.5"},
       {:excoveralls, "~> 0.11.1", only: :test},
       {:dialyzex, "~> 1.2.0", only: :dev}
+    ]
+  end
+
+  defp dialyzer_ignored_warnings do
+    [
+      {:warn_matching, {'lib/astarte_device/handler.ex', 82},
+       {:pattern_match, ['pattern {\'error\', __@7}', '{\'ok\',\'nil\'}']}}
     ]
   end
 end
