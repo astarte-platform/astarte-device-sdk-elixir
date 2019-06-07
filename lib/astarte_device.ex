@@ -594,12 +594,12 @@ defmodule Astarte.Device do
     :keep_state_and_data
   end
 
-  def handle_disconnected_publish(from) do
+  defp handle_disconnected_publish(from) do
     actions = [{:reply, from, {:error, :device_disconnected}}]
     {:keep_state_and_data, actions}
   end
 
-  def handle_publish(publish_params, data) do
+  defp handle_publish(publish_params, data) do
     %{
       publish_type: publish_type,
       interface_name: interface_name,
