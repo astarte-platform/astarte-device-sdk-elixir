@@ -46,7 +46,10 @@ defmodule Astarte.Device do
       :credential_storage_mod,
       :credential_storage_state,
       :interface_provider_mod,
-      :interface_provider_state
+      :interface_provider_state,
+      :handler_mod,
+      :handler_args,
+      :handler_pid
     ]
   end
 
@@ -71,6 +74,7 @@ defmodule Astarte.Device do
                | {:credentials_secret, String.t()}
                | {:credential_storage, {module(), term()}}
                | {:interface_provider, {module(), term()}}
+               | {:handler, {module(), term()}}
                | {:ignore_ssl_errors, boolean()},
              device_options: [device_option]
   def start_link(device_options) do
@@ -86,6 +90,9 @@ defmodule Astarte.Device do
 
     {interface_provider_mod, interface_provider_args} =
       Keyword.fetch!(device_options, :interface_provider)
+
+    {handler_mod, handler_args} =
+      Keyword.get(device_options, :handler, {Astarte.Device.DefaultHandler, []})
 
     with {:device_id, {:ok, _decoded_device_id}} <-
            {:device_id, Astarte.Core.Device.decode_device_id(device_id)},
@@ -103,7 +110,9 @@ defmodule Astarte.Device do
         credential_storage_mod: credential_storage_mod,
         credential_storage_state: credential_storage_state,
         interface_provider_mod: interface_provider_mod,
-        interface_provider_state: interface_provider_state
+        interface_provider_state: interface_provider_state,
+        handler_mod: handler_mod,
+        handler_args: handler_args
       }
 
       :gen_statem.start_link(__MODULE__, data, [])
@@ -177,8 +186,23 @@ defmodule Astarte.Device do
   def init(data) do
     %Data{
       credential_storage_mod: credential_storage_mod,
-      credential_storage_state: credential_storage_state
+      credential_storage_state: credential_storage_state,
+      realm: realm,
+      device_id: device_id,
+      handler_mod: handler_mod,
+      handler_args: handler_args
     } = data
+
+    handler_full_args = [
+      realm: realm,
+      device_id: device_id,
+      user_args: handler_args
+    ]
+
+    # TODO: this should probably go in a supervision tree with the Device
+    {:ok, handler_pid} = handler_mod.start_link(handler_full_args)
+
+    new_data = %{data | handler_pid: handler_pid}
 
     with {:keypair, true} <-
            {:keypair, credential_storage_mod.has_keypair?(credential_storage_state)},
@@ -187,18 +211,18 @@ defmodule Astarte.Device do
          {:valid_certificate, true} <-
            {:valid_certificate, valid_certificate?(pem_certificate)} do
       actions = [{:next_event, :internal, :connect}]
-      {:ok, :disconnected, data, actions}
+      {:ok, :disconnected, new_data, actions}
     else
       {:keypair, false} ->
         actions = [{:next_event, :internal, :generate_keypair}]
-        {:ok, :no_keypair, data, actions}
+        {:ok, :no_keypair, new_data, actions}
 
       {:certificate, :error} ->
-        {:ok, :no_certificate, data}
+        {:ok, :no_certificate, new_data}
 
       {:valid_certificate, false} ->
         # If the certificate is invalid, we treat it like it's not there
-        {:ok, :no_certificate, data}
+        {:ok, :no_certificate, new_data}
 
       {:error, reason} ->
         {:stop, reason}
