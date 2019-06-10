@@ -26,32 +26,76 @@ defmodule Astarte.Device do
   require Logger
   alias Astarte.Core.Interface
   alias Astarte.Core.Mapping
-
-  # 7 days
-  @nearly_expired_seconds 7 * 24 * 60 * 60
-  @key_size 4096
+  alias Astarte.Device.Impl
 
   defmodule Data do
     @moduledoc false
 
-    defstruct [
+    @type t :: %Astarte.Device.Data{
+            pairing_url: String.t(),
+            realm: String.t(),
+            device_id: Astarte.Core.Device.encoded_device_id(),
+            client_id: String.t(),
+            credentials_secret: String.t(),
+            ignore_ssl_errors: boolean(),
+            credential_storage_mod: module(),
+            credential_storage_state: term(),
+            interface_provider_mod: module(),
+            interface_provider_state: term(),
+            handler_pid: pid(),
+            broker_url: String.t() | nil,
+            mqtt_connection: pid() | nil
+          }
+
+    @enforce_keys [
       :pairing_url,
       :realm,
       :device_id,
       :client_id,
       :credentials_secret,
-      :broker_url,
-      :mqtt_connection,
       :ignore_ssl_errors,
       :credential_storage_mod,
       :credential_storage_state,
       :interface_provider_mod,
       :interface_provider_state,
-      :handler_mod,
-      :handler_args,
       :handler_pid
     ]
+    defstruct [
+      :broker_url,
+      :mqtt_connection
+      | @enforce_keys
+    ]
+
+    def from_opts!(opts) do
+      pairing_url = Keyword.fetch!(opts, :pairing_url)
+      realm = Keyword.fetch!(opts, :realm)
+      device_id = Keyword.fetch!(opts, :device_id)
+      client_id = Keyword.fetch!(opts, :client_id)
+      credentials_secret = Keyword.fetch!(opts, :credentials_secret)
+      ignore_ssl_errors = Keyword.fetch!(opts, :ignore_ssl_errors)
+      credential_storage_mod = Keyword.fetch!(opts, :credential_storage_mod)
+      credential_storage_state = Keyword.fetch!(opts, :credential_storage_state)
+      interface_provider_mod = Keyword.fetch!(opts, :interface_provider_mod)
+      interface_provider_state = Keyword.fetch!(opts, :interface_provider_state)
+      handler_pid = Keyword.fetch!(opts, :handler_pid)
+
+      %Data{
+        pairing_url: pairing_url,
+        realm: realm,
+        device_id: device_id,
+        client_id: client_id,
+        credentials_secret: credentials_secret,
+        ignore_ssl_errors: ignore_ssl_errors,
+        credential_storage_mod: credential_storage_mod,
+        credential_storage_state: credential_storage_state,
+        interface_provider_mod: interface_provider_mod,
+        interface_provider_state: interface_provider_state,
+        handler_pid: handler_pid
+      }
+    end
   end
+
+  @key_size 4096
 
   # API
 
@@ -108,7 +152,7 @@ defmodule Astarte.Device do
            {:cred, credential_storage_mod.init(credential_storage_args)},
          {:interface, {:ok, interface_provider_state}} <-
            {:interface, interface_provider_mod.init(interface_provider_args)} do
-      data = %Data{
+      opts = [
         pairing_url: pairing_url,
         realm: realm,
         device_id: device_id,
@@ -121,9 +165,9 @@ defmodule Astarte.Device do
         interface_provider_state: interface_provider_state,
         handler_mod: handler_mod,
         handler_args: handler_args
-      }
+      ]
 
-      :gen_statem.start_link(__MODULE__, data, [])
+      :gen_statem.start_link(__MODULE__, opts, [])
     else
       {:device_id, _} ->
         _ = Logger.warn("#{client_id}: Invalid device_id: #{device_id}")
@@ -191,15 +235,11 @@ defmodule Astarte.Device do
   def callback_mode, do: :state_functions
 
   @impl true
-  def init(data) do
-    %Data{
-      credential_storage_mod: credential_storage_mod,
-      credential_storage_state: credential_storage_state,
-      realm: realm,
-      device_id: device_id,
-      handler_mod: handler_mod,
-      handler_args: handler_args
-    } = data
+  def init(opts) do
+    realm = Keyword.fetch!(opts, :realm)
+    device_id = Keyword.fetch!(opts, :device_id)
+    handler_mod = Keyword.fetch!(opts, :handler_mod)
+    handler_args = Keyword.fetch!(opts, :handler_args)
 
     handler_full_args = [
       realm: realm,
@@ -207,50 +247,24 @@ defmodule Astarte.Device do
       user_args: handler_args
     ]
 
-    # TODO: this should probably go in a supervision tree with the Device
+    # TODO: this should probably go in a supervision tree with the Device,
+    # avoiding the need to peek in the options
     {:ok, handler_pid} = handler_mod.start_link(handler_full_args)
 
-    new_data = %{data | handler_pid: handler_pid}
+    new_opts = Keyword.put(opts, :handler_pid, handler_pid)
 
-    with {:keypair, true} <-
-           {:keypair, credential_storage_mod.has_keypair?(credential_storage_state)},
-         {:certificate, {:ok, pem_certificate}} <-
-           {:certificate, credential_storage_mod.fetch(:certificate, credential_storage_state)},
-         {:valid_certificate, true} <-
-           {:valid_certificate, valid_certificate?(pem_certificate)} do
-      actions = [{:next_event, :internal, :connect}]
-      {:ok, :disconnected, new_data, actions}
-    else
-      {:keypair, false} ->
+    case Impl.init(new_opts) do
+      {:ok, new_data} ->
+        actions = [{:next_event, :internal, :request_info}]
+        {:ok, :waiting_for_info, new_data, actions}
+
+      {:no_keypair, new_data} ->
         actions = [{:next_event, :internal, :generate_keypair}]
         {:ok, :no_keypair, new_data, actions}
 
-      {:certificate, :error} ->
-        {:ok, :no_certificate, new_data}
-
-      {:valid_certificate, false} ->
-        # If the certificate is invalid, we treat it like it's not there
-        {:ok, :no_certificate, new_data}
-
-      {:error, reason} ->
-        {:stop, reason}
-    end
-  end
-
-  defp valid_certificate?(pem_certificate) do
-    with {:ok, certificate} <- X509.Certificate.from_pem(pem_certificate) do
-      {:Validity, _not_before, not_after} = X509.Certificate.validity(certificate)
-
-      seconds_until_expiry =
-        not_after
-        |> X509.DateTime.to_datetime()
-        |> DateTime.diff(DateTime.utc_now())
-
-      # If the certificate it's near its expiration, we treat it as invalid
-      seconds_until_expiry > @nearly_expired_seconds
-    else
-      {:error, _reason} ->
-        false
+      {:no_certificate, new_data} ->
+        actions = [{:next_event, :internal, :request_certificate}]
+        {:ok, :no_certificate, new_data, actions}
     end
   end
 
