@@ -95,8 +95,6 @@ defmodule Astarte.Device do
     end
   end
 
-  @key_size 4096
-
   # API
 
   @doc """
@@ -269,52 +267,16 @@ defmodule Astarte.Device do
   end
 
   def no_keypair(:internal, :generate_keypair, data) do
-    %Data{
-      client_id: client_id,
-      credential_storage_mod: credential_storage_mod,
-      credential_storage_state: credential_storage_state
-    } = data
+    case Impl.generate_keypair(data) do
+      {:ok, new_data} ->
+        actions = [{:next_event, :internal, :request_certificate}]
+        {:next_state, :no_certificate, new_data, actions}
 
-    _ = Logger.info("#{client_id}: Generating a new keypair")
-
-    # TODO: make crypto configurable (RSA/EC, key size/curve)
-    private_key = X509.PrivateKey.new_rsa(@key_size)
-
-    pem_csr =
-      private_key
-      |> X509.CSR.new("CN=#{client_id}")
-      |> X509.CSR.to_pem()
-
-    pem_private_key = X509.PrivateKey.to_pem(private_key)
-
-    with {:ok, with_key_state} <-
-           credential_storage_mod.save(
-             :private_key,
-             pem_private_key,
-             credential_storage_state
-           ),
-         {:ok, with_key_and_csr_state} <-
-           credential_storage_mod.save(:csr, pem_csr, with_key_state) do
-      new_data = %{data | credential_storage_state: with_key_and_csr_state}
-      actions = [{:next_event, :internal, :request_certificate}]
-
-      {:next_state, :no_certificate, new_data, actions}
-    else
       {:error, reason} ->
-        # TODO: exponential backoff
-        _ =
-          Logger.warn(
-            "#{client_id}: Failed to save keypair to credential storage: #{inspect(reason)}, trying again in 5 seconds"
-          )
-
-        actions = [{:state_timeout, 5000, :retry_generate_keypair}]
-        {:keep_state_and_data, actions}
+        # TODO: handle transient errors, for now we stop if a keypair
+        # can't be generated or saved
+        {:stop, reason}
     end
-  end
-
-  def no_keypair(:state_timeout, :retry_generate_keypair, _data) do
-    actions = [{:next_event, :internal, :generate_keypair}]
-    {:keep_state_and_data, actions}
   end
 
   def no_keypair({:call, from}, _request, _data) do
