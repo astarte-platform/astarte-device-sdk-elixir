@@ -284,67 +284,19 @@ defmodule Astarte.Device do
   end
 
   def no_certificate(:internal, :request_certificate, data) do
-    %Data{
-      client_id: client_id,
-      pairing_url: pairing_url,
-      realm: realm,
-      credentials_secret: credentials_secret,
-      device_id: device_id,
-      credential_storage_mod: credential_storage_mod,
-      credential_storage_state: credential_storage_state
-    } = data
+    case Impl.request_certificate(data) do
+      {:ok, new_data} ->
+        actions = [{:next_event, :internal, :request_info}]
+        {:next_state, :waiting_for_info, new_data, actions}
 
-    _ = Logger.info("#{client_id}: Requesting new certificate")
-
-    client = Astarte.API.Pairing.client(pairing_url, realm, auth_token: credentials_secret)
-    {:ok, csr} = credential_storage_mod.fetch(:csr, credential_storage_state)
-
-    with {:api, {:ok, %{status: 201, body: body}}} <-
-           {:api, Astarte.API.Pairing.Devices.get_mqtt_v1_credentials(client, device_id, csr)},
-         %{"data" => %{"client_crt" => pem_certificate}} = body,
-         {:store, {:ok, new_credential_storage_state}} <-
-           {:store,
-            credential_storage_mod.save(
-              :certificate,
-              pem_certificate,
-              credential_storage_state
-            )} do
-      _ = Logger.info("#{client_id}: Received new certificate")
-      new_data = %{data | credential_storage_state: new_credential_storage_state}
-      actions = [{:next_event, :internal, :request_info}]
-      {:next_state, :waiting_for_info, new_data, actions}
-    else
-      {:api, {:error, reason}} ->
-        # HTTP request can't be made
+      {:error, :temporary} ->
         # TODO: exponential backoff
-        _ =
-          Logger.warn(
-            "#{client_id}: Failed to ask for a certificate: #{inspect(reason)}. Trying again in 30 seconds"
-          )
-
         actions = [{:state_timeout, 30_000, :retry_request_certificate}]
+        _ = Logger.warn("Trying again in 30 seconds")
         {:keep_state_and_data, actions}
 
-      {:api, {:ok, %{status: status, body: body}}} ->
-        # HTTP request succeeded but returned an error status
-        # TODO: pattern match on the status + exponential backoff
-        _ =
-          Logger.warn(
-            "#{client_id}: Get credentials failed with status #{status}: #{inspect(body)}. Trying again in 30 seconds."
-          )
-
-        actions = [{:state_timeout, 30_000, :retry_request_certificate}]
-        {:keep_state_and_data, actions}
-
-      {:store, {:error, reason}} ->
-        # TODO: exponential backoff
-        _ =
-          Logger.warn(
-            "#{client_id}: Credential storage could not save certificate: #{inspect(reason)}. Trying again in 30 seconds."
-          )
-
-        actions = [{:state_timeout, 30_000, :retry_request_certificate}]
-        {:keep_state_and_data, actions}
+      {:error, reason} ->
+        {:stop, reason}
     end
   end
 

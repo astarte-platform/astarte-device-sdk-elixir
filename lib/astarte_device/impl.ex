@@ -107,4 +107,74 @@ defmodule Astarte.Device.Impl do
       {:ok, %{data | credential_storage_state: with_key_and_csr_state}}
     end
   end
+
+  @spec request_certificate(data :: data()) ::
+          {:ok, new_data :: data()}
+          | {:error, :temporary}
+          | {:error, reason :: term()}
+  def request_certificate(data) do
+    alias Astarte.API.Pairing
+
+    %Data{
+      client_id: client_id,
+      pairing_url: pairing_url,
+      realm: realm,
+      credentials_secret: credentials_secret,
+      device_id: device_id,
+      credential_storage_mod: credential_storage_mod,
+      credential_storage_state: credential_storage_state
+    } = data
+
+    _ = Logger.info("#{client_id}: Requesting new certificate")
+
+    client = Pairing.client(pairing_url, realm, auth_token: credentials_secret)
+    {:ok, csr} = credential_storage_mod.fetch(:csr, credential_storage_state)
+
+    with {:api, {:ok, %{status: 201, body: body}}} <-
+           {:api, Pairing.Devices.get_mqtt_v1_credentials(client, device_id, csr)},
+         %{"data" => %{"client_crt" => pem_cert}} = body,
+         {:store, {:ok, new_credential_storage_state}} <-
+           {:store, credential_storage_mod.save(:certificate, pem_cert, credential_storage_state)} do
+      _ = Logger.info("#{client_id}: Received new certificate")
+      {:ok, %{data | credential_storage_state: new_credential_storage_state}}
+    else
+      error ->
+        classify_error(error, client_id)
+    end
+  end
+
+  defp classify_error({:api, {:error, reason}}, log_tag)
+       when reason in [:econnrefused, :closed] do
+    # Temporary errors
+    _ = Logger.warn("#{log_tag}: Temporary failure in API request: #{inspect(reason)}.")
+    {:error, :temporary}
+  end
+
+  defp classify_error({:api, {:error, reason}}, log_tag) do
+    # Other errors are assumed to be permanent
+    _ = Logger.warn("#{log_tag}: Failure in API request: #{inspect(reason)}.")
+    {:error, reason}
+  end
+
+  defp classify_error({:api, {:ok, %{status: status, body: body}}}, log_tag)
+       when status >= 500 do
+    # We assume Server Errors in the 500 range are temporary
+    _ = Logger.warn("#{log_tag}: API request failed with status #{status}: #{inspect(body)}.")
+
+    {:error, :temporary}
+  end
+
+  defp classify_error({:api, {:ok, %{status: status, body: body}}}, log_tag)
+       when status >= 400 and status < 500 do
+    # All HTTP errors in the 400 range are assumed to be permanent (authentication, bad request etc)
+    _ = Logger.warn("#{log_tag}: API request failed with status #{status}: #{inspect(body)}.")
+
+    {:error, :request_certificate_failed}
+  end
+
+  defp classify_error({:store, {:error, reason}}, log_tag) do
+    # Storage errors are assumed to be permanent
+    _ = Logger.warn("#{log_tag}: failed to store credentials")
+    {:error, reason}
+  end
 end
