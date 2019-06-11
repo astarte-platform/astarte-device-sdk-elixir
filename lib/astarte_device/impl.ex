@@ -176,6 +176,8 @@ defmodule Astarte.Device.Impl do
           {:ok, new_data :: data()}
           | {:error, reason :: term()}
   def connect(data) do
+    alias Astarte.Device.TortoiseConnection, as: Connection
+
     %Data{
       client_id: client_id,
       broker_url: broker_url,
@@ -186,61 +188,32 @@ defmodule Astarte.Device.Impl do
       interface_provider_state: interface_provider_state
     } = data
 
-    %URI{
-      host: broker_host,
-      port: broker_port
-    } = URI.parse(broker_url)
-
-    verify = if ignore_ssl_errors, do: :verify_none, else: :verify_peer
-
     with {:ok, pem_private_key} <-
            credential_storage_mod.fetch(:private_key, credential_storage_state),
          {:ok, pem_certificate} <-
-           credential_storage_mod.fetch(:certificate, credential_storage_state) do
-      server_owned_interfaces =
-        interface_provider_mod.server_owned_interfaces(interface_provider_state)
-
-      der_certificate =
-        pem_certificate
-        |> X509.Certificate.from_pem!()
-        |> X509.Certificate.to_der()
-
-      der_private_key =
-        pem_private_key
-        |> X509.PrivateKey.from_pem!()
-        |> X509.PrivateKey.to_der()
-
-      server_opts = [
-        host: broker_host,
-        port: broker_port,
-        cacertfile: :certifi.cacertfile(),
-        key: {:RSAPrivateKey, der_private_key},
-        cert: der_certificate,
-        verify: verify
-      ]
-
-      subscriptions = build_subscriptions(client_id, server_owned_interfaces)
-
-      tortoise_opts = [
-        client_id: client_id,
-        handler: {Astarte.Device.MqttHandler, device_pid: self()},
-        server: {Tortoise.Transport.SSL, server_opts},
-        subscriptions: subscriptions
-      ]
-
-      with {:ok, pid} <- Tortoise.Connection.start_link(tortoise_opts) do
-        {:ok, %{data | mqtt_connection: pid}}
-      end
+           credential_storage_mod.fetch(:certificate, credential_storage_state),
+         server_owned_interfaces =
+           interface_provider_mod.server_owned_interfaces(interface_provider_state),
+         initial_subscriptions = build_subscriptions(client_id, server_owned_interfaces),
+         connection_opts = [
+           client_id: client_id,
+           broker_url: broker_url,
+           key_pem: pem_private_key,
+           certificate_pem: pem_certificate,
+           initial_subscriptions: initial_subscriptions,
+           ignore_ssl_errors: ignore_ssl_errors
+         ],
+         {:ok, pid} <- Connection.start_link(connection_opts) do
+      {:ok, %{data | mqtt_connection: pid}}
     end
   end
 
   defp build_subscriptions(client_id, server_interfaces) do
-    # Subscriptions are {topic_filter, qos} tuples
-    control_topic_subscription = {"#{client_id}/control/#", 2}
+    control_topic_subscription = "#{client_id}/control/#"
 
     interface_topic_subscriptions =
       Enum.flat_map(server_interfaces, fn %Interface{name: interface_name} ->
-        [{"#{client_id}/#{interface_name}", 2}, {"#{client_id}/#{interface_name}/#", 2}]
+        ["#{client_id}/#{interface_name}", "#{client_id}/#{interface_name}/#"]
       end)
 
     [control_topic_subscription | interface_topic_subscriptions]

@@ -62,7 +62,14 @@ defmodule Astarte.Device.MixProject do
   defp dialyzer_ignored_warnings do
     [
       {:warn_matching, {'lib/astarte_device/handler.ex', 82},
-       {:pattern_match, ['pattern {\'error\', __@7}', '{\'ok\',\'nil\'}']}}
+       {:pattern_match, ['pattern {\'error\', __@7}', '{\'ok\',\'nil\'}']}},
+      # Remove when this https://github.com/gausby/tortoise/pull/110 gets merged
+      {:warn_matching, {'lib/astarte_device/impl.ex', :_},
+       {:pattern_match,
+        [
+          'pattern {\'ok\', _pid@1}',
+          '{\'error\',\'invalid_args\' | \'invalid_certificate\' | \'invalid_private_key\'}'
+        ]}}
     ]
   end
 end
