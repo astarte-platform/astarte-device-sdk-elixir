@@ -310,47 +310,19 @@ defmodule Astarte.Device do
   end
 
   def waiting_for_info(:internal, :request_info, data) do
-    %Data{
-      client_id: client_id,
-      credentials_secret: credentials_secret,
-      pairing_url: pairing_url,
-      realm: realm,
-      device_id: device_id
-    } = data
+    case Impl.request_info(data) do
+      {:ok, new_data} ->
+        actions = [{:next_event, :internal, :connect}]
+        {:next_state, :disconnected, new_data, actions}
 
-    _ = Logger.info("#{client_id}: Requesting info")
-
-    client = Astarte.API.Pairing.client(pairing_url, realm, auth_token: credentials_secret)
-
-    with {:ok, %{status: 200, body: body}} <- Astarte.API.Pairing.Devices.info(client, device_id),
-         broker_url when not is_nil(broker_url) <-
-           get_in(body, ["data", "protocols", "astarte_mqtt_v1", "broker_url"]) do
-      _ = Logger.info("#{client_id}: Broker url is #{broker_url}")
-      new_data = %{data | broker_url: broker_url}
-      actions = [{:next_event, :internal, :connect}]
-      {:next_state, :disconnected, new_data, actions}
-    else
-      {:error, reason} ->
-        # HTTP request can't be made
+      {:error, :temporary} ->
         # TODO: exponential backoff
-        _ =
-          Logger.warn(
-            "#{client_id}: Failed to obtain transport info: #{inspect(reason)}. Trying again in 30 seconds"
-          )
-
         actions = [{:state_timeout, 30_000, :retry_request_info}]
+        _ = Logger.warn("Trying again in 30 seconds")
         {:keep_state_and_data, actions}
 
-      {:ok, %{status: status, body: body}} ->
-        # HTTP request succeeded but returned an error status
-        # TODO: pattern match on the status + exponential backoff
-        _ =
-          Logger.warn(
-            "#{client_id}: Get info failed with status #{status}: #{inspect(body)}. Trying again in 30 seconds."
-          )
-
-        actions = [{:state_timeout, 30_000, :retry_request_info}]
-        {:keep_state_and_data, actions}
+      {:error, reason} ->
+        {:stop, reason}
     end
   end
 

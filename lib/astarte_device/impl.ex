@@ -143,6 +143,34 @@ defmodule Astarte.Device.Impl do
     end
   end
 
+  @spec request_info(data :: data()) ::
+          {:ok, new_data :: data()}
+          | {:error, :temporary}
+          | {:error, reason :: term()}
+  def request_info(data) do
+    %Data{
+      client_id: client_id,
+      credentials_secret: credentials_secret,
+      pairing_url: pairing_url,
+      realm: realm,
+      device_id: device_id
+    } = data
+
+    _ = Logger.info("#{client_id}: Requesting info")
+
+    client = Astarte.API.Pairing.client(pairing_url, realm, auth_token: credentials_secret)
+
+    with {:api, {:ok, %{status: 200, body: body}}} <-
+           {:api, Astarte.API.Pairing.Devices.info(client, device_id)} do
+      %{"data" => %{"protocols" => %{"astarte_mqtt_v1" => %{"broker_url" => broker_url}}}} = body
+      _ = Logger.info("#{client_id}: Broker url is #{broker_url}")
+      {:ok, %{data | broker_url: broker_url}}
+    else
+      error ->
+        classify_error(error, client_id)
+    end
+  end
+
   defp classify_error({:api, {:error, reason}}, log_tag)
        when reason in [:econnrefused, :closed] do
     # Temporary errors
