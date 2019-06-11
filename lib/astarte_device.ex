@@ -336,74 +336,13 @@ defmodule Astarte.Device do
   end
 
   def disconnected(:internal, :connect, data) do
-    %Data{
-      client_id: client_id,
-      broker_url: broker_url,
-      ignore_ssl_errors: ignore_ssl_errors,
-      credential_storage_mod: credential_storage_mod,
-      credential_storage_state: credential_storage_state,
-      interface_provider_mod: interface_provider_mod,
-      interface_provider_state: interface_provider_state
-    } = data
+    case Impl.connect(data) do
+      {:ok, new_data} ->
+        {:next_state, :connecting, new_data}
 
-    %URI{
-      host: broker_host,
-      port: broker_port
-    } = URI.parse(broker_url)
-
-    verify = if ignore_ssl_errors, do: :verify_none, else: :verify_peer
-
-    with {:ok, pem_private_key} <-
-           credential_storage_mod.fetch(:private_key, credential_storage_state),
-         {:ok, pem_certificate} <-
-           credential_storage_mod.fetch(:certificate, credential_storage_state) do
-      server_owned_interfaces =
-        interface_provider_mod.server_owned_interfaces(interface_provider_state)
-
-      der_certificate =
-        pem_certificate
-        |> X509.Certificate.from_pem!()
-        |> X509.Certificate.to_der()
-
-      der_private_key =
-        pem_private_key
-        |> X509.PrivateKey.from_pem!()
-        |> X509.PrivateKey.to_der()
-
-      server_opts = [
-        host: broker_host,
-        port: broker_port,
-        cacertfile: :certifi.cacertfile(),
-        key: {:RSAPrivateKey, der_private_key},
-        cert: der_certificate,
-        verify: verify
-      ]
-
-      subscriptions = build_subscriptions(client_id, server_owned_interfaces)
-
-      tortoise_opts = [
-        client_id: client_id,
-        handler: {Astarte.Device.MqttHandler, device_pid: self()},
-        server: {Tortoise.Transport.SSL, server_opts},
-        subscriptions: subscriptions
-      ]
-
-      # TODO: trap exits to catch SSL errors, timeouts etc
-      case Tortoise.Connection.start_link(tortoise_opts) do
-        {:ok, pid} ->
-          new_data = %{data | mqtt_connection: pid}
-          {:next_state, :connecting, new_data}
-
-        {:error, reason} ->
-          _ =
-            Logger.warn(
-              "#{client_id}: failed to connect: #{inspect(reason)}. Trying again in 30 seconds."
-            )
-
-          # TODO: exponential backoff
-          actions = [{:state_timeout, :retry_connect, 30_000}]
-          {:keep_state_and_data, actions}
-      end
+      {:error, reason} ->
+        # The connection has its own retry mechanism, if we're here the error is fatal
+        {:stop, reason}
     end
   end
 
@@ -414,18 +353,6 @@ defmodule Astarte.Device do
 
   def disconnected({:call, from}, _request, _data) do
     handle_disconnected_publish(from)
-  end
-
-  defp build_subscriptions(client_id, server_interfaces) do
-    # Subscriptions are {topic_filter, qos} tuples
-    control_topic_subscription = {"#{client_id}/control/#", 2}
-
-    interface_topic_subscriptions =
-      Enum.flat_map(server_interfaces, fn %Interface{name: interface_name} ->
-        [{"#{client_id}/#{interface_name}", 2}, {"#{client_id}/#{interface_name}/#", 2}]
-      end)
-
-    [control_topic_subscription | interface_topic_subscriptions]
   end
 
   def connecting(:cast, {:connection_status, :up}, %Data{client_id: client_id} = data) do
