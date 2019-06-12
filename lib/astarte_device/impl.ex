@@ -23,6 +23,7 @@ defmodule Astarte.Device.Impl do
 
   alias Astarte.Core.Interface
   alias Astarte.Device.Data
+  alias Astarte.Device.TortoiseConnection, as: Connection
 
   # 7 days
   @nearly_expired_seconds 7 * 24 * 60 * 60
@@ -176,8 +177,6 @@ defmodule Astarte.Device.Impl do
           {:ok, new_data :: data()}
           | {:error, reason :: term()}
   def connect(data) do
-    alias Astarte.Device.TortoiseConnection, as: Connection
-
     %Data{
       client_id: client_id,
       broker_url: broker_url,
@@ -208,6 +207,51 @@ defmodule Astarte.Device.Impl do
     end
   end
 
+  @spec send_introspection(data :: data()) :: :ok | {:error, reason :: term()}
+  def send_introspection(data) do
+    %Data{
+      client_id: client_id,
+      interface_provider_mod: interface_provider_mod,
+      interface_provider_state: interface_provider_state
+    } = data
+
+    interfaces = interface_provider_mod.all_interfaces(interface_provider_state)
+
+    introspection = build_introspection(interfaces)
+
+    _ = Logger.info("#{client_id}: Sending introspection: #{introspection}")
+
+    # Introspection topic is the same as client_id
+    topic = client_id
+    Connection.publish_sync(client_id, topic, introspection, qos: 2)
+  end
+
+  @spec send_empty_cache(data :: data()) :: :ok | {:error, reason :: term()}
+  def send_empty_cache(data) do
+    %Data{
+      client_id: client_id
+    } = data
+
+    _ = Logger.info("#{client_id}: Sending empty cache")
+
+    topic = "#{client_id}/control/emptyCache"
+    payload = "1"
+
+    Connection.publish_sync(client_id, topic, payload, qos: 2)
+  end
+
+  @spec send_producer_properties(data :: data()) :: :ok
+  def send_producer_properties(data) do
+    %Data{
+      client_id: client_id
+    } = data
+
+    _ = Logger.info("#{client_id}: Sending producer properties")
+    # TODO: build and send producer properties
+
+    :ok
+  end
+
   defp build_subscriptions(client_id, server_interfaces) do
     control_topic_subscription = "#{client_id}/control/#"
 
@@ -217,6 +261,13 @@ defmodule Astarte.Device.Impl do
       end)
 
     [control_topic_subscription | interface_topic_subscriptions]
+  end
+
+  defp build_introspection(interfaces) do
+    for %Interface{name: interface_name, major_version: major, minor_version: minor} <- interfaces do
+      "#{interface_name}:#{major}:#{minor}"
+    end
+    |> Enum.join(";")
   end
 
   defp classify_error({:api, {:error, reason}}, log_tag)

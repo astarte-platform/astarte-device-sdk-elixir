@@ -373,43 +373,22 @@ defmodule Astarte.Device do
   end
 
   def connected(:internal, :send_introspection, data) do
-    %Data{
-      client_id: client_id,
-      interface_provider_mod: interface_provider_mod,
-      interface_provider_state: interface_provider_state
-    } = data
-
-    interfaces = interface_provider_mod.all_interfaces(interface_provider_state)
-
-    introspection = build_introspection(interfaces)
-
-    _ = Logger.info("#{client_id}: Sending introspection: #{introspection}")
-
-    # Introspection topic is the same as client_id
-    topic = client_id
-    :ok = Tortoise.publish_sync(client_id, topic, introspection, qos: 2)
+    # TODO: handle errors
+    :ok = Impl.send_introspection(data)
 
     :keep_state_and_data
   end
 
   def connected(:internal, :send_empty_cache, data) do
-    %Data{
-      client_id: client_id
-    } = data
-
-    _ = Logger.info("#{client_id}: Sending empty cache")
-    # TODO: send empty cache
+    # TODO: handle errors
+    :ok = Impl.send_empty_cache(data)
 
     :keep_state_and_data
   end
 
   def connected(:internal, :send_producer_properties, data) do
-    %Data{
-      client_id: client_id
-    } = data
-
-    _ = Logger.info("#{client_id}: Sending producer properties")
-    # TODO: build and send producer properties
+    # TODO: handle errors
+    :ok = Impl.send_producer_properties(data)
 
     :keep_state_and_data
   end
@@ -643,12 +622,5 @@ defmodule Astarte.Device do
       _ ->
         %{v: value}
     end
-  end
-
-  defp build_introspection(interfaces) do
-    for %Interface{name: interface_name, major_version: major, minor_version: minor} <- interfaces do
-      "#{interface_name}:#{major}:#{minor}"
-    end
-    |> Enum.join(";")
   end
 end
