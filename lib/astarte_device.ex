@@ -425,29 +425,29 @@ defmodule Astarte.Device do
   end
 
   def connected({:call, from}, {:send_datastream, interface_name, path, value, opts}, data) do
-    publish_params = %{
+    publish_params = [
       publish_type: :datastream,
       interface_name: interface_name,
       path: path,
       value: value,
       opts: opts
-    }
+    ]
 
-    reply = handle_publish(publish_params, data)
+    reply = Impl.publish(publish_params, data)
     actions = [{:reply, from, reply}]
     {:keep_state_and_data, actions}
   end
 
   def connected({:call, from}, {:set_property, interface_name, path, value}, data) do
-    publish_params = %{
+    publish_params = [
       publish_type: :properties,
       interface_name: interface_name,
       path: path,
       value: value,
       opts: [qos: 2]
-    }
+    ]
 
-    reply = handle_publish(publish_params, data)
+    reply = Impl.publish(publish_params, data)
     actions = [{:reply, from, reply}]
     {:keep_state_and_data, actions}
   end
@@ -524,82 +524,6 @@ defmodule Astarte.Device do
     {:keep_state_and_data, actions}
   end
 
-  defp handle_publish(publish_params, data) do
-    %{
-      publish_type: publish_type,
-      interface_name: interface_name,
-      path: path,
-      value: value,
-      opts: opts
-    } = publish_params
-
-    %Data{
-      client_id: client_id,
-      interface_provider_mod: interface_provider_mod,
-      interface_provider_state: interface_provider_state
-    } = data
-
-    with {:ok, %Interface{type: ^publish_type} = interface} <-
-           interface_provider_mod.fetch_interface(interface_name, interface_provider_state) do
-      publish(client_id, interface, path, value, opts)
-    else
-      :error ->
-        _ =
-          Logger.warn(
-            "#{client_id}: Trying to publish to not-existing interface #{interface_name}. Ignoring."
-          )
-
-        {:error, :interface_not_found}
-
-      # We weren't expecting properties, so we came from send_datastream
-      {:ok, %Interface{type: :properties}} ->
-        _ =
-          Logger.warn("#{client_id}: send_datastream on properties interface: #{interface_name}")
-
-        {:error, :properties_interface}
-
-      # We weren't expecting datastream, so we came from set_property
-      {:ok, %Interface{type: :datastream}} ->
-        _ = Logger.warn("#{client_id}: set_property on datastream interface: #{interface_name}")
-
-        {:error, :properties_interface}
-    end
-  end
-
-  defp publish(client_id, interface, path, value, opts) do
-    # TODO:
-    # - Handle empty payload (check allow_unset)
-    # - Enforce timestamps if explicit_timestamp is true
-    # - Check aggregation
-
-    %Interface{
-      name: interface_name
-    } = interface
-
-    with %Interface{ownership: :device, mappings: mappings} <- interface,
-         {:ok, %Mapping{value_type: expected_type}} <- find_mapping(path, mappings),
-         :ok <- Mapping.ValueType.validate_value(expected_type, value),
-         payload_map = build_payload_map(value, opts),
-         {:ok, bson_payload} <- Cyanide.encode(payload_map) do
-      publish_opts = Keyword.take(opts, [:qos])
-
-      topic = Path.join([client_id, interface_name, path])
-
-      Tortoise.publish_sync(client_id, topic, bson_payload, publish_opts)
-    else
-      %Interface{ownership: :server} ->
-        _ =
-          Logger.warn(
-            "#{client_id}: Trying to publish to server-owned interface #{interface_name}"
-          )
-
-        {:error, :server_owned_interface}
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
   defp find_mapping(path, mappings) do
     with {:ok, endpoint_automaton} <- Mapping.EndpointsAutomaton.build(mappings),
          {:ok, endpoint} <- Mapping.EndpointsAutomaton.resolve_path(path, endpoint_automaton),
@@ -611,16 +535,6 @@ defmodule Astarte.Device do
     else
       _ ->
         {:error, :cannot_resolve_path}
-    end
-  end
-
-  defp build_payload_map(value, opts) do
-    case Keyword.fetch(opts, :timestamp) do
-      {:ok, %DateTime{} = timestamp} ->
-        %{v: value, t: timestamp}
-
-      _ ->
-        %{v: value}
     end
   end
 end

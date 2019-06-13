@@ -21,6 +21,7 @@ defmodule Astarte.Device.Impl do
 
   require Logger
 
+  alias Astarte.Core.Mapping
   alias Astarte.Core.Interface
   alias Astarte.Device.Data
   alias Astarte.Device.TortoiseConnection, as: Connection
@@ -207,6 +208,51 @@ defmodule Astarte.Device.Impl do
     end
   end
 
+  @spec publish(publish_params, data :: data()) :: :ok | {:error, reason :: term()}
+        when publish_params: [publish_param],
+             publish_param:
+               {:publish_type, :datastream | :properties}
+               | {:interface_name, interface_name :: String.t()}
+               | {:path, path :: String.t()}
+               | {:value, value :: term()}
+               | {:opts, options},
+             options: [option],
+             option:
+               {:qos, qos}
+               | {:timestamp, timestamp :: DateTime.t()},
+             qos: 0 | 1 | 2
+  def publish(publish_params, data) do
+    # TODO:
+    # - Handle empty payload (check allow_unset)
+    # - Enforce timestamps if explicit_timestamp is true
+    # - Check aggregation
+
+    %Data{
+      client_id: client_id
+    } = data
+
+    publish_type = Keyword.fetch!(publish_params, :publish_type)
+    interface_name = Keyword.fetch!(publish_params, :interface_name)
+    path = Keyword.fetch!(publish_params, :path)
+    value = Keyword.fetch!(publish_params, :value)
+    opts = Keyword.get(publish_params, :opts, [])
+
+    with {:ok, interface} <- fetch_interface(interface_name, data),
+         :ok <- validate_publish_type(publish_type, interface),
+         :ok <- validate_device_owned_interface(interface),
+         mappings = interface.mappings,
+         {:ok, %Mapping{value_type: expected_type}} <- find_mapping(path, mappings),
+         :ok <- Mapping.ValueType.validate_value(expected_type, value),
+         payload_map = build_payload_map(value, opts),
+         {:ok, bson_payload} <- Cyanide.encode(payload_map) do
+      publish_opts = Keyword.take(opts, [:qos])
+
+      topic = Path.join([client_id, interface_name, path])
+
+      Connection.publish_sync(client_id, topic, bson_payload, publish_opts)
+    end
+  end
+
   @spec send_introspection(data :: data()) :: :ok | {:error, reason :: term()}
   def send_introspection(data) do
     %Data{
@@ -269,6 +315,62 @@ defmodule Astarte.Device.Impl do
     end
     |> Enum.join(";")
   end
+
+  defp fetch_interface(interface_name, data) do
+    %Data{
+      interface_provider_mod: interface_provider_mod,
+      interface_provider_state: interface_provider_state
+    } = data
+
+    case interface_provider_mod.fetch_interface(interface_name, interface_provider_state) do
+      {:ok, interface} ->
+        {:ok, interface}
+
+      :error ->
+        {:error, :interface_not_found}
+    end
+  end
+
+  defp find_mapping(path, mappings) do
+    alias Mapping.EndpointsAutomaton
+
+    with {:ok, endpoint_automaton} <- EndpointsAutomaton.build(mappings),
+         {:ok, endpoint} <- EndpointsAutomaton.resolve_path(path, endpoint_automaton),
+         %Mapping{} = mapping <-
+           Enum.find(mappings, fn %Mapping{} = mapping ->
+             mapping.endpoint == endpoint
+           end) do
+      {:ok, mapping}
+    else
+      _ ->
+        {:error, :cannot_resolve_path}
+    end
+  end
+
+  defp build_payload_map(value, opts) do
+    case Keyword.fetch(opts, :timestamp) do
+      {:ok, %DateTime{} = timestamp} ->
+        %{v: value, t: timestamp}
+
+      _ ->
+        %{v: value}
+    end
+  end
+
+  defp validate_publish_type(publish_type, %Interface{type: publish_type}) do
+    :ok
+  end
+
+  defp validate_publish_type(_type, %Interface{type: :properties}) do
+    {:error, :properties_interface}
+  end
+
+  defp validate_publish_type(_type, %Interface{type: :datastream}) do
+    {:error, :datastream_interface}
+  end
+
+  defp validate_device_owned_interface(%Interface{ownership: :device}), do: :ok
+  defp validate_device_owned_interface(_interface), do: {:error, :server_owned_interface}
 
   defp classify_error({:api, {:error, reason}}, log_tag)
        when reason in [:econnrefused, :closed] do
