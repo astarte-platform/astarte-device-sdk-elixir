@@ -21,10 +21,13 @@ defmodule Astarte.Device.Impl do
 
   require Logger
 
+  # Mockable modules
+  @connection Application.get_env(:astarte_device, :connection_mod)
+  @pairing_devices Application.get_env(:astarte_device, :pairing_devices_mod)
+
   alias Astarte.Core.Mapping
   alias Astarte.Core.Interface
   alias Astarte.Device.Data
-  alias Astarte.Device.TortoiseConnection, as: Connection
 
   # 7 days
   @nearly_expired_seconds 7 * 24 * 60 * 60
@@ -134,7 +137,7 @@ defmodule Astarte.Device.Impl do
     {:ok, csr} = credential_storage_mod.fetch(:csr, credential_storage_state)
 
     with {:api, {:ok, %{status: 201, body: body}}} <-
-           {:api, Pairing.Devices.get_mqtt_v1_credentials(client, device_id, csr)},
+           {:api, @pairing_devices.get_mqtt_v1_credentials(client, device_id, csr)},
          %{"data" => %{"client_crt" => pem_cert}} = body,
          {:store, {:ok, new_credential_storage_state}} <-
            {:store, credential_storage_mod.save(:certificate, pem_cert, credential_storage_state)} do
@@ -164,7 +167,7 @@ defmodule Astarte.Device.Impl do
     client = Astarte.API.Pairing.client(pairing_url, realm, auth_token: credentials_secret)
 
     with {:api, {:ok, %{status: 200, body: body}}} <-
-           {:api, Astarte.API.Pairing.Devices.info(client, device_id)} do
+           {:api, @pairing_devices.info(client, device_id)} do
       %{"data" => %{"protocols" => %{"astarte_mqtt_v1" => %{"broker_url" => broker_url}}}} = body
       _ = Logger.info("#{client_id}: Broker url is #{broker_url}")
       {:ok, %{data | broker_url: broker_url}}
@@ -203,7 +206,7 @@ defmodule Astarte.Device.Impl do
            initial_subscriptions: initial_subscriptions,
            ignore_ssl_errors: ignore_ssl_errors
          ],
-         {:ok, pid} <- Connection.start_link(connection_opts) do
+         {:ok, pid} <- @connection.start_link(connection_opts) do
       {:ok, %{data | mqtt_connection: pid}}
     end
   end
@@ -249,7 +252,7 @@ defmodule Astarte.Device.Impl do
 
       topic = Path.join([client_id, interface_name, path])
 
-      Connection.publish_sync(client_id, topic, bson_payload, publish_opts)
+      @connection.publish_sync(client_id, topic, bson_payload, publish_opts)
     end
   end
 
@@ -269,7 +272,7 @@ defmodule Astarte.Device.Impl do
 
     # Introspection topic is the same as client_id
     topic = client_id
-    Connection.publish_sync(client_id, topic, introspection, qos: 2)
+    @connection.publish_sync(client_id, topic, introspection, qos: 2)
   end
 
   @spec send_empty_cache(data :: data()) :: :ok | {:error, reason :: term()}
@@ -283,7 +286,7 @@ defmodule Astarte.Device.Impl do
     topic = "#{client_id}/control/emptyCache"
     payload = "1"
 
-    Connection.publish_sync(client_id, topic, payload, qos: 2)
+    @connection.publish_sync(client_id, topic, payload, qos: 2)
   end
 
   @spec send_producer_properties(data :: data()) :: :ok
