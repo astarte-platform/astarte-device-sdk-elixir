@@ -239,7 +239,7 @@ defmodule Astarte.Device.Impl do
 
     with {:ok, interface} <- fetch_interface(interface_name, data),
          :ok <- validate_publish_type(publish_type, interface),
-         :ok <- validate_device_owned_interface(interface),
+         :ok <- validate_ownership(:device, interface),
          mappings = interface.mappings,
          {:ok, %Mapping{value_type: expected_type}} <- find_mapping(path, mappings),
          :ok <- Mapping.ValueType.validate_value(expected_type, value),
@@ -296,6 +296,74 @@ defmodule Astarte.Device.Impl do
     # TODO: build and send producer properties
 
     :ok
+  end
+
+  @spec handle_message(topic_tokens :: [String.t()], payload :: term(), data :: data()) ::
+          :ok | {:ok, new_data :: data()} | {:error, reason :: term()}
+  def handle_message(topic_tokens, payload, data) do
+    %Data{
+      client_id: client_id,
+      realm: realm,
+      device_id: device_id
+    } = data
+
+    case topic_tokens do
+      [^realm, ^device_id, "control" | control_path_tokens] ->
+        handle_control_message(control_path_tokens, payload, data)
+
+      [^realm, ^device_id, interface_name | path_tokens] ->
+        handle_data_message(interface_name, path_tokens, payload, data)
+
+      other_topic_tokens ->
+        _ =
+          Logger.warn(
+            "#{client_id}: received message on unhandled topic #{Path.join(other_topic_tokens)}"
+          )
+
+        {:error, :invalid_incoming_message}
+    end
+  end
+
+  defp handle_control_message(["emptyCache"], _payload, _data) do
+    # This is sent by us and "mirrored" by the broker, ignore it
+    :ok
+  end
+
+  defp handle_control_message(control_path_tokens, payload, data) do
+    %Data{
+      client_id: client_id
+    } = data
+
+    # TODO: handle control messages
+    _ =
+      Logger.info(
+        "#{client_id}: received control message, control_path_tokens=#{
+          inspect(control_path_tokens)
+        }, payload=#{inspect(payload)}"
+      )
+
+    :ok
+  end
+
+  defp handle_data_message(interface_name, path_tokens, payload, data) do
+    %Data{
+      handler_pid: handler_pid
+    } = data
+
+    path = "/" <> Path.join(path_tokens)
+
+    # TODO: persist the message to avoid losing it in case of a crash
+
+    with {:ok, interface} <- fetch_interface(interface_name, data),
+         :ok <- validate_ownership(:server, interface),
+         mappings = interface.mappings,
+         {:ok, %Mapping{value_type: expected_type}} <- find_mapping(path, mappings),
+         {:ok, %{"v" => value} = decoded_map} <- Cyanide.decode(payload),
+         timestamp = Map.get(decoded_map, "t"),
+         :ok <- Mapping.ValueType.validate_value(expected_type, value) do
+      request = {:msg, interface_name, path_tokens, value, timestamp}
+      GenServer.cast(handler_pid, request)
+    end
   end
 
   defp build_subscriptions(client_id, server_interfaces) do
@@ -369,8 +437,17 @@ defmodule Astarte.Device.Impl do
     {:error, :datastream_interface}
   end
 
-  defp validate_device_owned_interface(%Interface{ownership: :device}), do: :ok
-  defp validate_device_owned_interface(_interface), do: {:error, :server_owned_interface}
+  defp validate_ownership(ownership, %Interface{ownership: ownership}) do
+    :ok
+  end
+
+  defp validate_ownership(_ownership, %Interface{ownership: :server}) do
+    {:error, :server_owned_interface}
+  end
+
+  defp validate_ownership(_ownership, %Interface{ownership: :device}) do
+    {:error, :device_owned_interface}
+  end
 
   defp classify_error({:api, {:error, reason}}, log_tag)
        when reason in [:econnrefused, :closed] do

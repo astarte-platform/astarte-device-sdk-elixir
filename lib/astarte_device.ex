@@ -24,8 +24,6 @@ defmodule Astarte.Device do
   @behaviour :gen_statem
 
   require Logger
-  alias Astarte.Core.Interface
-  alias Astarte.Core.Mapping
   alias Astarte.Device.Impl
 
   defmodule Data do
@@ -402,24 +400,18 @@ defmodule Astarte.Device do
 
   def connected(:cast, {:msg, topic_tokens, payload}, data) do
     %Data{
-      client_id: client_id,
-      realm: realm,
-      device_id: device_id
+      client_id: client_id
     } = data
 
-    case topic_tokens do
-      [^realm, ^device_id, "control" | control_path_tokens] ->
-        handle_control_message(control_path_tokens, payload, data)
+    case Impl.handle_message(topic_tokens, payload, data) do
+      :ok ->
+        :keep_state_and_data
 
-      [^realm, ^device_id, interface_name | path_tokens] ->
-        handle_data_message(interface_name, path_tokens, payload, data)
+      {:ok, new_data} ->
+        {:keep_state, new_data}
 
-      other_topic_tokens ->
-        _ =
-          Logger.warn(
-            "#{client_id}: received message on unhandled topic #{Path.join(other_topic_tokens)}"
-          )
-
+      {:error, reason} ->
+        Logger.warn("#{client_id}: error in handle_message #{inspect(reason)}")
         :keep_state_and_data
     end
   end
@@ -456,85 +448,8 @@ defmodule Astarte.Device do
     :keep_state_and_data
   end
 
-  defp handle_control_message(control_path_tokens, payload, data) do
-    %Data{
-      client_id: client_id
-    } = data
-
-    # TODO: handle control messages
-    _ =
-      Logger.info(
-        "#{client_id}: received control message, control_path_tokens=#{
-          inspect(control_path_tokens)
-        }, payload=#{inspect(payload)}"
-      )
-
-    :keep_state_and_data
-  end
-
-  defp handle_data_message(interface_name, path_tokens, payload, data) do
-    %Data{
-      client_id: client_id,
-      interface_provider_mod: interface_provider_mod,
-      interface_provider_state: interface_provider_state,
-      handler_pid: handler_pid
-    } = data
-
-    path = "/" <> Path.join(path_tokens)
-
-    # TODO: persist the message to avoid losing it in case of a crash
-
-    with {:ok, %Interface{ownership: :server, mappings: mappings}} <-
-           interface_provider_mod.fetch_interface(interface_name, interface_provider_state),
-         {:ok, %Mapping{value_type: expected_type}} <- find_mapping(path, mappings),
-         {:ok, %{"v" => value} = decoded_map} <- Cyanide.decode(payload),
-         timestamp = Map.get(decoded_map, "t"),
-         :ok <- Mapping.ValueType.validate_value(expected_type, value) do
-      request = {:msg, interface_name, path_tokens, value, timestamp}
-      :ok = GenServer.cast(handler_pid, request)
-      :keep_state_and_data
-    else
-      :error ->
-        _ = Logger.warn("#{client_id}: interface not found on incoming data: #{interface_name}")
-
-        :keep_state_and_data
-
-      {:ok, %Interface{ownership: :device}} ->
-        _ =
-          Logger.warn(
-            "#{client_id}: incoming data on device owned interface: #{interface_name} #{path}"
-          )
-
-        :keep_state_and_data
-
-      {:error, reason} ->
-        _ =
-          Logger.warn(
-            "#{client_id}: error in handle_data_message on #{interface_name} #{path}: #{
-              inspect(reason)
-            }"
-          )
-
-        :keep_state_and_data
-    end
-  end
-
   defp handle_disconnected_publish(from) do
     actions = [{:reply, from, {:error, :device_disconnected}}]
     {:keep_state_and_data, actions}
-  end
-
-  defp find_mapping(path, mappings) do
-    with {:ok, endpoint_automaton} <- Mapping.EndpointsAutomaton.build(mappings),
-         {:ok, endpoint} <- Mapping.EndpointsAutomaton.resolve_path(path, endpoint_automaton),
-         %Mapping{} = mapping <-
-           Enum.find(mappings, fn %Mapping{} = mapping ->
-             mapping.endpoint == endpoint
-           end) do
-      {:ok, mapping}
-    else
-      _ ->
-        {:error, :cannot_resolve_path}
-    end
   end
 end
