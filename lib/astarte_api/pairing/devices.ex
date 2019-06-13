@@ -21,6 +21,28 @@ defmodule Astarte.API.Pairing.Devices do
   Astarte Pairing API used by devices. The `:auth_token` provided when creating the client for this module should be the credentials secret of the device.
   """
 
+  defmodule Behaviour do
+    # Behaviour module to help with tests
+    @moduledoc false
+
+    @callback info(client :: Astarte.API.client(), device_id :: String.t()) ::
+                Astarte.API.result()
+
+    @callback get_mqtt_v1_credentials(
+                client :: Astarte.API.client(),
+                device_id :: String.t(),
+                csr :: String.t()
+              ) :: Astarte.API.result()
+
+    @callback verify_mqtt_v1_credentials(
+                client :: Astarte.API.client(),
+                device_id :: String.t(),
+                certificate :: String.t()
+              ) :: Astarte.API.result()
+  end
+
+  @behaviour Astarte.API.Pairing.Devices.Behaviour
+
   @doc """
   Get the transports info for a device.
 
@@ -32,6 +54,7 @@ defmodule Astarte.API.Pairing.Devices do
     * `{:ok, result}` if the HTTP request can be performed. `result` will be a map with `status`, `headers` and `body`.
     * `{:error, reason}` if the HTTP request can't be performed.
   """
+  @impl true
   @spec info(client :: Astarte.API.client(), device_id :: String.t()) :: Astarte.API.result()
   def info(client, device_id) do
     url = "/devices/#{device_id}"
@@ -52,6 +75,7 @@ defmodule Astarte.API.Pairing.Devices do
     * `{:ok, result}` if the HTTP request can be performed. `result` will be a map with `status`, `headers` and `body`.
     * `{:error, reason}` if the HTTP request can't be performed.
   """
+  @impl true
   @spec get_mqtt_v1_credentials(
           client :: Astarte.API.client(),
           device_id :: String.t(),
@@ -77,6 +101,7 @@ defmodule Astarte.API.Pairing.Devices do
     * `{:ok, result}` if the HTTP request can be performed. `result` will be a map with `status`, `headers` and `body`.
     * `{:error, reason}` if the HTTP request can't be performed.
   """
+  @impl true
   @spec verify_mqtt_v1_credentials(
           client :: Astarte.API.client(),
           device_id :: String.t(),
