@@ -33,6 +33,7 @@ defmodule Astarte.Device.MixProject do
         "coveralls.html": :test
       ],
       deps: deps(),
+      elixirc_paths: elixirc_paths(Mix.env()),
       dialyzer_ignored_warnings: dialyzer_ignored_warnings()
     ]
   end
@@ -55,14 +56,25 @@ defmodule Astarte.Device.MixProject do
       {:tortoise, "~> 0.9"},
       {:x509, "~> 0.5"},
       {:excoveralls, "~> 0.11.1", only: :test},
+      {:mox, "~> 0.5", only: :test},
       {:dialyzex, "~> 1.2.0", only: :dev}
     ]
   end
 
+  defp elixirc_paths(:test), do: ["test/support", "lib"]
+  defp elixirc_paths(_), do: ["lib"]
+
   defp dialyzer_ignored_warnings do
     [
       {:warn_matching, {'lib/astarte_device/handler.ex', 82},
-       {:pattern_match, ['pattern {\'error\', __@7}', '{\'ok\',\'nil\'}']}}
+       {:pattern_match, ['pattern {\'error\', __@7}', '{\'ok\',\'nil\'}']}},
+      # Remove when this https://github.com/gausby/tortoise/pull/110 gets merged
+      {:warn_matching, {'lib/astarte_device/impl.ex', :_},
+       {:pattern_match,
+        [
+          'pattern {\'ok\', _pid@1}',
+          '{\'error\',\'invalid_args\' | \'invalid_certificate\' | \'invalid_private_key\'}'
+        ]}}
     ]
   end
 end

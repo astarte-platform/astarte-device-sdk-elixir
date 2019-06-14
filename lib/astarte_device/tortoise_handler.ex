@@ -16,7 +16,7 @@
 # limitations under the License.
 #
 
-defmodule Astarte.Device.MqttHandler do
+defmodule Astarte.Device.TortoiseHandler do
   @moduledoc false
 
   require Logger
