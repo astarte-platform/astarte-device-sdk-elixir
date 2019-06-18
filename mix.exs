@@ -41,6 +41,7 @@ defmodule Astarte.Device.MixProject do
   # Run "mix help compile.app" to learn about applications.
   def application do
     [
+      mod: {Astarte.Device.Application, []},
       extra_applications: [:logger]
     ]
   end
