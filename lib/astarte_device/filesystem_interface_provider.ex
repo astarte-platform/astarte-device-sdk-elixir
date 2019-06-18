@@ -49,7 +49,7 @@ defmodule Astarte.Device.FilesystemInterfaceProvider do
           {:ok, %{interface_name => interface}}
 
         :error ->
-          {:ok, []}
+          {:ok, %{}}
       end
     end
   end
