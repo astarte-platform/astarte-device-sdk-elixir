@@ -41,6 +41,7 @@ defmodule Astarte.Device do
             interface_provider_mod: module(),
             interface_provider_state: term(),
             handler_pid: pid(),
+            waiting_for_connection: [pid()],
             broker_url: String.t() | nil,
             mqtt_connection: pid() | nil
           }
@@ -56,7 +57,8 @@ defmodule Astarte.Device do
       :credential_storage_state,
       :interface_provider_mod,
       :interface_provider_state,
-      :handler_pid
+      :handler_pid,
+      :waiting_for_connection
     ]
     defstruct [
       :broker_url,
@@ -88,7 +90,8 @@ defmodule Astarte.Device do
         credential_storage_state: credential_storage_state,
         interface_provider_mod: interface_provider_mod,
         interface_provider_state: interface_provider_state,
-        handler_pid: handler_pid
+        handler_pid: handler_pid,
+        waiting_for_connection: []
       }
     end
   end
@@ -251,6 +254,17 @@ defmodule Astarte.Device do
     :gen_statem.call(pid, {:set_property, interface_name, path, value})
   end
 
+  @doc """
+  Blocks until the device succesfully connects to the broker, then returns `:ok`.
+
+  Useful to ensure the device has established the initial connection before beginning
+  to publish.
+  """
+  @spec wait_for_connection(pid :: pid()) :: :ok
+  def wait_for_connection(pid) do
+    :gen_statem.call(pid, :wait_for_connection)
+  end
+
   # Callbacks
 
   @impl true
@@ -303,6 +317,10 @@ defmodule Astarte.Device do
     end
   end
 
+  def no_keypair({:call, from}, :wait_for_connection, data) do
+    add_waiting_for_connection(data, from)
+  end
+
   def no_keypair({:call, from}, _request, _data) do
     handle_disconnected_publish(from)
   end
@@ -327,6 +345,10 @@ defmodule Astarte.Device do
   def no_certificate(:state_timeout, :retry_request_certificate, _data) do
     actions = [{:next_event, :internal, :request_certificate}]
     {:keep_state_and_data, actions}
+  end
+
+  def no_certificate({:call, from}, :wait_for_connection, data) do
+    add_waiting_for_connection(data, from)
   end
 
   def no_certificate({:call, from}, _request, _data) do
@@ -355,6 +377,10 @@ defmodule Astarte.Device do
     {:keep_state_and_data, actions}
   end
 
+  def waiting_for_info({:call, from}, :wait_for_connection, data) do
+    add_waiting_for_connection(data, from)
+  end
+
   def waiting_for_info({:call, from}, _request, _data) do
     handle_disconnected_publish(from)
   end
@@ -375,6 +401,10 @@ defmodule Astarte.Device do
     {:keep_state_and_data, actions}
   end
 
+  def disconnected({:call, from}, :wait_for_connection, data) do
+    add_waiting_for_connection(data, from)
+  end
+
   def disconnected({:call, from}, _request, _data) do
     handle_disconnected_publish(from)
   end
@@ -382,14 +412,31 @@ defmodule Astarte.Device do
   def connecting(:cast, {:connection_status, :up}, %Data{client_id: client_id} = data) do
     _ = Logger.info("#{client_id}: Connected")
 
+    %Data{
+      waiting_for_connection: waiting
+    } = data
+
+    # Reply to all clients waiting for connection
+    connection_reply_actions =
+      for ref <- waiting do
+        {:reply, ref, :ok}
+      end
+
     # TODO: we always send empty cache and producer properties for now since we can't access the session_present flag
     actions = [
       {:next_event, :internal, :send_introspection},
       {:next_event, :internal, :send_empty_cache},
       {:next_event, :internal, :send_producer_properties}
+      | connection_reply_actions
     ]
 
-    {:next_state, :connected, data, actions}
+    new_data = %{data | waiting_for_connection: []}
+
+    {:next_state, :connected, new_data, actions}
+  end
+
+  def connecting({:call, from}, :wait_for_connection, data) do
+    add_waiting_for_connection(data, from)
   end
 
   def connecting({:call, from}, _request, _data) do
@@ -442,6 +489,11 @@ defmodule Astarte.Device do
     end
   end
 
+  def connected({:call, from}, :wait_for_connection, _data) do
+    actions = [{:reply, from, :ok}]
+    {:keep_state_and_data, actions}
+  end
+
   def connected({:call, from}, {:send_datastream, interface_name, path, value, opts}, data) do
     publish_params = [
       publish_type: :datastream,
@@ -472,6 +524,12 @@ defmodule Astarte.Device do
 
   def connected(_event_type, _event, _data) do
     :keep_state_and_data
+  end
+
+  defp add_waiting_for_connection(%Data{waiting_for_connection: waiting} = data, from) do
+    new_data = %{data | waiting_for_connection: [from | waiting]}
+
+    {:keep_state, new_data}
   end
 
   defp handle_disconnected_publish(from) do
