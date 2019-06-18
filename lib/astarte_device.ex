@@ -95,6 +95,18 @@ defmodule Astarte.Device do
 
   # API
 
+  @type device_options :: [device_option]
+
+  @type device_option ::
+          {:pairing_url, String.t()}
+          | {:realm, String.t()}
+          | {:device_id, String.t()}
+          | {:credentials_secret, String.t()}
+          | {:credential_storage, {module(), term()}}
+          | {:interface_provider, {module(), term()} | String.t()}
+          | {:handler, {module(), term()}}
+          | {:ignore_ssl_errors, boolean()}
+
   @doc """
   Start an `Astarte.Device`.
 
@@ -108,17 +120,7 @@ defmodule Astarte.Device do
     * `handler` (optional) - A tuple `{module, args}` where `module` is a module implementing `Astarte.Device.Handler` behaviour and `args` are the arguments passed to its `init_state` function. If not provided, `Astarte.Device.DefaultHandler` will be used.
     * `ignore_ssl_errors` (optional) - Defaults to `false`, if `true` the device will ignore SSL errors during connection. Useful if you're using the Device to connect to a test instance of Astarte with self signed certificates, it is not recommended to leave this `true` in production.
   """
-  @spec start_link(device_options) :: :gen_statem.start_ret()
-        when device_option:
-               {:pairing_url, String.t()}
-               | {:realm, String.t()}
-               | {:device_id, String.t()}
-               | {:credentials_secret, String.t()}
-               | {:credential_storage, {module(), term()}}
-               | {:interface_provider, {module(), term()} | String.t()}
-               | {:handler, {module(), term()}}
-               | {:ignore_ssl_errors, boolean()},
-             device_options: [device_option]
+  @spec start_link(opts :: device_options()) :: :gen_statem.start_ret()
   def start_link(device_options) do
     pairing_url = Keyword.fetch!(device_options, :pairing_url)
     realm = Keyword.fetch!(device_options, :realm)
