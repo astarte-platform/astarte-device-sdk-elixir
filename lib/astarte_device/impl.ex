@@ -22,8 +22,16 @@ defmodule Astarte.Device.Impl do
   require Logger
 
   # Mockable modules
-  @connection Application.get_env(:astarte_device, :connection_mod)
-  @pairing_devices Application.get_env(:astarte_device, :pairing_devices_mod)
+  @connection Application.get_env(
+                :astarte_device,
+                :connection_mod,
+                Astarte.Device.TortoiseConnection
+              )
+  @pairing_devices Application.get_env(
+                     :astarte_device,
+                     :pairing_devices_mod,
+                     Astarte.API.Pairing.Devices
+                   )
 
   alias Astarte.Core.Mapping
   alias Astarte.Core.Interface
