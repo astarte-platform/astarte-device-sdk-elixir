@@ -165,7 +165,7 @@ defmodule Astarte.Device do
         handler_args: handler_args
       ]
 
-      :gen_statem.start_link(__MODULE__, opts, [])
+      :gen_statem.start_link(via_tuple(realm, device_id), __MODULE__, opts, [])
     else
       {:device_id, _} ->
         _ = Logger.warn("#{client_id}: Invalid device_id: #{device_id}")
@@ -188,6 +188,30 @@ defmodule Astarte.Device do
 
         {:error, :interface_provider_failed}
     end
+  end
+
+  @doc """
+  Returns the `pid` of the `Astarte.Device` process for the given `realm/device_id` pair, or `nil` if
+  there's no existing device for that pair.
+
+  Devices are registered to `Astarte.Device.Registry` with key `{realm, device_id}` when they are started.
+  """
+  @spec get_pid(realm :: String.t(), device_id :: Astarte.Core.Device.encoded_device_id()) ::
+          pid() | nil
+  def get_pid(realm, device_id) do
+    case Registry.lookup(Astarte.Device.Registry, {realm, device_id}) do
+      [{pid, _}] ->
+        pid
+
+      _ ->
+        nil
+    end
+  end
+
+  @spec via_tuple(realm :: String.t(), device_id :: Astarte.Core.Device.encoded_device_id()) ::
+          {:via, registry :: module(), via_name :: term()}
+  defp via_tuple(realm, device_id) do
+    {:via, Registry, {Astarte.Device.Registry, {realm, device_id}}}
   end
 
   @doc """
