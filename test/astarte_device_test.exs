@@ -148,7 +148,8 @@ defmodule Astarte.DeviceTest do
 
       :ok = wait_for_connection()
 
-      assert Device.send_datastream(device, interface, path, value) == {:error, :properties_interface}
+      assert Device.send_datastream(device, interface, path, value) ==
+               {:error, :properties_interface}
     end
 
     test "fails on a server owned interface", %{device: device} do
@@ -158,7 +159,8 @@ defmodule Astarte.DeviceTest do
 
       :ok = wait_for_connection()
 
-      assert Device.send_datastream(device, interface, path, value) == {:error, :server_owned_interface}
+      assert Device.send_datastream(device, interface, path, value) ==
+               {:error, :server_owned_interface}
     end
 
     test "fails with invalid type", %{device: device} do
@@ -168,7 +170,8 @@ defmodule Astarte.DeviceTest do
 
       :ok = wait_for_connection()
 
-      assert Device.send_datastream(device, interface, path, value) == {:error, :unexpected_value_type}
+      assert Device.send_datastream(device, interface, path, value) ==
+               {:error, :unexpected_value_type}
     end
 
     test "fails with unknown path", %{device: device} do
@@ -178,7 +181,8 @@ defmodule Astarte.DeviceTest do
 
       :ok = wait_for_connection()
 
-      assert Device.send_datastream(device, interface, path, value) == {:error, :cannot_resolve_path}
+      assert Device.send_datastream(device, interface, path, value) ==
+               {:error, :cannot_resolve_path}
     end
 
     test "succeeds on a datastream interface", %{device: device} do
@@ -210,7 +214,8 @@ defmodule Astarte.DeviceTest do
 
       :ok = wait_for_connection()
 
-      assert Device.set_property(device, interface, path, value) == {:error, :datastream_interface}
+      assert Device.set_property(device, interface, path, value) ==
+               {:error, :datastream_interface}
     end
 
     test "succeeds on a property interface", %{device: device} do
