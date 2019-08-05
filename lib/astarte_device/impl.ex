@@ -236,7 +236,6 @@ defmodule Astarte.Device.Impl do
     # TODO:
     # - Handle empty payload (check allow_unset)
     # - Enforce timestamps if explicit_timestamp is true
-    # - Check aggregation
 
     %Data{
       client_id: client_id
@@ -251,9 +250,7 @@ defmodule Astarte.Device.Impl do
     with {:ok, interface} <- fetch_interface(interface_name, data),
          :ok <- validate_publish_type(publish_type, interface),
          :ok <- validate_ownership(:device, interface),
-         mappings = interface.mappings,
-         {:ok, %Mapping{value_type: expected_type}} <- find_mapping(path, mappings),
-         :ok <- Mapping.ValueType.validate_value(expected_type, value),
+         :ok <- validate_path_and_type(interface, path, value),
          payload_map = build_payload_map(value, opts),
          {:ok, bson_payload} <- Cyanide.encode(payload_map) do
       publish_opts = Keyword.take(opts, [:qos])
@@ -458,6 +455,24 @@ defmodule Astarte.Device.Impl do
 
   defp validate_ownership(_ownership, %Interface{ownership: :device}) do
     {:error, :device_owned_interface}
+  end
+
+  defp validate_path_and_type(%Interface{aggregation: :individual} = interface, path, value) do
+    mappings = interface.mappings
+
+    with {:ok, %Mapping{value_type: expected_type}} <- find_mapping(path, mappings) do
+      Mapping.ValueType.validate_value(expected_type, value)
+    end
+  end
+
+  defp validate_path_and_type(%Interface{aggregation: :object}, "/" <> _bare_path, _value) do
+    # TODO: validate object aggregation interfaces, currently it just checks
+    # that the path begins with /
+    :ok
+  end
+
+  defp validate_path_and_type(%Interface{aggregation: :object}, _invalid_path, _value) do
+    {:error, :cannot_resolve_path}
   end
 
   defp classify_error({:api, {:error, reason}}, log_tag)
