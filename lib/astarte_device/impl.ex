@@ -254,8 +254,15 @@ defmodule Astarte.Device.Impl do
          payload_map = build_payload_map(value, opts),
          {:ok, bson_payload} <- Cyanide.encode(payload_map) do
       publish_opts = Keyword.take(opts, [:qos])
+      "/" <> bare_path = path
 
-      topic = Path.join([client_id, interface_name, path])
+      topic =
+        if bare_path == "" do
+          # Handle publishing on root interface topic for object aggregations
+          Enum.join([client_id, interface_name], "/")
+        else
+          Enum.join([client_id, interface_name, bare_path], "/")
+        end
 
       @connection.publish_sync(client_id, topic, bson_payload, publish_opts)
     end
