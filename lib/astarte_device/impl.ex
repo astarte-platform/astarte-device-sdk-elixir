@@ -483,7 +483,7 @@ defmodule Astarte.Device.Impl do
   end
 
   defp classify_error({:api, {:error, reason}}, log_tag)
-       when reason in [:econnrefused, :closed] do
+       when reason in [:econnrefused, :closed, :timeout] do
     # Temporary errors
     _ = Logger.warn("#{log_tag}: Temporary failure in API request: #{inspect(reason)}.")
     {:error, :temporary}
