@@ -111,6 +111,17 @@ defmodule Astarte.Device do
           | {:ignore_ssl_errors, boolean()}
 
   @doc """
+  Returns a specification to start this module under a supervisor.
+  See `Supervisor` in Elixir v1.6+.
+  """
+  def child_spec(arg) do
+    %{
+      id: __MODULE__,
+      start: {__MODULE__, :start_link, [arg]}
+    }
+  end
+
+  @doc """
   Start an `Astarte.Device`.
 
   ## Device Options
