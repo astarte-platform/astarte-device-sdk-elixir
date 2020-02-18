@@ -21,6 +21,18 @@ defmodule Astarte.API.Pairing.Agent do
   Astarte Pairing API used by agents. The `:auth_token` provided when creating the client for this module should be a JWT to access Pairing API.
   """
 
+  defmodule Behaviour do
+    # Behaviour module to help with tests
+    @moduledoc false
+
+    @callback register_device(
+                client :: Astarte.API.client(),
+                device_id :: String.t()
+              ) :: Astarte.API.result()
+  end
+
+  @behaviour Astarte.API.Pairing.Agent.Behaviour
+
   @doc """
   Registers a device.
 
