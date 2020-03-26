@@ -33,6 +33,7 @@ defmodule Astarte.Device.MixProject do
         "coveralls.html": :test
       ],
       deps: deps(),
+      package: package(),
       elixirc_paths: elixirc_paths(Mix.env()),
       dialyzer_ignored_warnings: dialyzer_ignored_warnings()
     ]
@@ -49,7 +50,7 @@ defmodule Astarte.Device.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:astarte_core, github: "astarte-platform/astarte_core", branch: "release-0.11"},
+      {:astarte_core, "~> 0.11-pre"},
       {:certifi, "~> 2.5"},
       {:hackney, "~> 1.15"},
       {:jason, "~> 1.1"},
@@ -57,6 +58,7 @@ defmodule Astarte.Device.MixProject do
       {:tortoise, "~> 0.9"},
       {:x509, "~> 0.5"},
       {:excoveralls, "~> 0.11.1", only: :test},
+      {:ex_doc, ">= 0.0.0", only: :dev, runtime: false},
       {:mox, "~> 0.5", only: :test},
       {:dialyzex, "~> 1.2.0", only: :dev}
     ]
@@ -76,6 +78,18 @@ defmodule Astarte.Device.MixProject do
           'pattern {\'ok\', _pid@1}',
           '{\'error\',\'invalid_args\' | \'invalid_certificate\' | \'invalid_private_key\'}'
         ]}}
+    ]
+  end
+
+  defp package do
+    [
+      description: "Astarte Elixir device SDK",
+      maintainers: ["Riccardo Binetti"],
+      licenses: ["Apache-2.0"],
+      links: %{
+        "GitHub" => "https://github.com/astarte-platform/astarte-device-sdk-elixir",
+        "Documentation" => "http://hexdocs.pm/astarte_device"
+      }
     ]
   end
 end
