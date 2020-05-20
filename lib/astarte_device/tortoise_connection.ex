@@ -49,6 +49,7 @@ defmodule Astarte.Device.TortoiseConnection do
         cacertfile: :certifi.cacertfile(),
         key: {:RSAPrivateKey, der_private_key},
         cert: der_certificate,
+        depth: 10,
         verify: verify
       ]
 
