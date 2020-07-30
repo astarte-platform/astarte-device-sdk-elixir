@@ -53,6 +53,7 @@ defmodule Astarte.Device do
       :client_id,
       :credentials_secret,
       :ignore_ssl_errors,
+      :max_http_redirects,
       :credential_storage_mod,
       :credential_storage_state,
       :interface_provider_mod,
@@ -73,6 +74,7 @@ defmodule Astarte.Device do
       client_id = Keyword.fetch!(opts, :client_id)
       credentials_secret = Keyword.fetch!(opts, :credentials_secret)
       ignore_ssl_errors = Keyword.fetch!(opts, :ignore_ssl_errors)
+      max_http_redirects = Keyword.fetch!(opts, :max_http_redirects)
       credential_storage_mod = Keyword.fetch!(opts, :credential_storage_mod)
       credential_storage_state = Keyword.fetch!(opts, :credential_storage_state)
       interface_provider_mod = Keyword.fetch!(opts, :interface_provider_mod)
@@ -86,6 +88,7 @@ defmodule Astarte.Device do
         client_id: client_id,
         credentials_secret: credentials_secret,
         ignore_ssl_errors: ignore_ssl_errors,
+        max_http_redirects: max_http_redirects,
         credential_storage_mod: credential_storage_mod,
         credential_storage_state: credential_storage_state,
         interface_provider_mod: interface_provider_mod,
@@ -110,6 +113,8 @@ defmodule Astarte.Device do
           | {:handler, {module(), term()}}
           | {:ignore_ssl_errors, boolean()}
 
+  @max_http_redirects_default 5
+
   @doc """
   Returns a specification to start this module under a supervisor.
   See `Supervisor` in Elixir v1.6+.
@@ -133,6 +138,8 @@ defmodule Astarte.Device do
     * `credential_storage` (optional) - A tuple `{module, args}` where `module` is a module implementing `Astarte.Device.CredentialStorage` behaviour and `args` are the arguments passed to its init function. If not provided, `Astarte.Device.InMemoryStorage` will be used.
     * `handler` (optional) - A tuple `{module, args}` where `module` is a module implementing `Astarte.Device.Handler` behaviour and `args` are the arguments passed to its `init_state` function. If not provided, `Astarte.Device.DefaultHandler` will be used.
     * `ignore_ssl_errors` (optional) - Defaults to `false`, if `true` the device will ignore SSL errors during connection. Useful if you're using the Device to connect to a test instance of Astarte with self signed certificates, it is not recommended to leave this `true` in production.
+    * `max_http_redirects` (optional) - The maximum number of HTTP redirects that will be followed by the Pairing HTTP client.
+    Defaults to #{@max_http_redirects_default}.
   """
   @spec start_link(opts :: device_options()) :: :gen_statem.start_ret()
   def start_link(device_options) do
@@ -142,6 +149,9 @@ defmodule Astarte.Device do
     client_id = "#{realm}/#{device_id}"
     credentials_secret = Keyword.fetch!(device_options, :credentials_secret)
     ignore_ssl_errors = Keyword.get(device_options, :ignore_ssl_errors, false)
+
+    max_http_redirects =
+      Keyword.get(device_options, :max_http_redirects, @max_http_redirects_default)
 
     {credential_storage_mod, credential_storage_args} =
       Keyword.get(device_options, :credential_storage, {Astarte.Device.InMemoryStorage, []})
@@ -171,6 +181,7 @@ defmodule Astarte.Device do
         client_id: client_id,
         credentials_secret: credentials_secret,
         ignore_ssl_errors: ignore_ssl_errors,
+        max_http_redirects: max_http_redirects,
         credential_storage_mod: credential_storage_mod,
         credential_storage_state: credential_storage_state,
         interface_provider_mod: interface_provider_mod,
