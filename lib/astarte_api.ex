@@ -28,10 +28,13 @@ defmodule Astarte.API do
   @spec client(base_url :: String.t(), opts :: Astarte.API.client_options()) ::
           Astarte.API.client()
   def client(base_url, opts) do
+    max_redirects = Keyword.get(opts, :max_redirects, 5)
+
     base_middlewares = [
       {Tesla.Middleware.BaseUrl, base_url},
       {Tesla.Middleware.JSON, []},
-      {Tesla.Middleware.Timeout, timeout: 25_000}
+      {Tesla.Middleware.Timeout, timeout: 25_000},
+      {Tesla.Middleware.FollowRedirects, max_redirects: max_redirects}
     ]
 
     middlewares =

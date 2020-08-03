@@ -135,13 +135,19 @@ defmodule Astarte.Device.Impl do
       realm: realm,
       credentials_secret: credentials_secret,
       device_id: device_id,
+      max_http_redirects: max_http_redirects,
       credential_storage_mod: credential_storage_mod,
       credential_storage_state: credential_storage_state
     } = data
 
     _ = Logger.info("#{client_id}: Requesting new certificate")
 
-    client = Pairing.client(pairing_url, realm, auth_token: credentials_secret)
+    client_opts = [
+      max_redirects: max_http_redirects,
+      auth_token: credentials_secret
+    ]
+
+    client = Pairing.client(pairing_url, realm, client_opts)
     {:ok, csr} = credential_storage_mod.fetch(:csr, credential_storage_state)
 
     with {:api, {:ok, %{status: 201, body: body}}} <-
@@ -165,6 +171,7 @@ defmodule Astarte.Device.Impl do
     %Data{
       client_id: client_id,
       credentials_secret: credentials_secret,
+      max_http_redirects: max_http_redirects,
       pairing_url: pairing_url,
       realm: realm,
       device_id: device_id
@@ -172,7 +179,12 @@ defmodule Astarte.Device.Impl do
 
     _ = Logger.info("#{client_id}: Requesting info")
 
-    client = Astarte.API.Pairing.client(pairing_url, realm, auth_token: credentials_secret)
+    client_opts = [
+      max_redirects: max_http_redirects,
+      auth_token: credentials_secret
+    ]
+
+    client = Astarte.API.Pairing.client(pairing_url, realm, client_opts)
 
     with {:api, {:ok, %{status: 200, body: body}}} <-
            {:api, @pairing_devices.info(client, device_id)} do
