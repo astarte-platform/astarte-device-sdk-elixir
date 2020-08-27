@@ -43,6 +43,9 @@ defmodule Astarte.Device.TortoiseConnection do
 
       der_certificate = X509.Certificate.to_der(certificate)
 
+      # This is needed to support wildcard certificates
+      hostname_match_fun = :public_key.pkix_verify_hostname_match_fun(:https)
+
       server_opts = [
         host: broker_host,
         port: broker_port,
@@ -50,7 +53,8 @@ defmodule Astarte.Device.TortoiseConnection do
         key: {:RSAPrivateKey, der_private_key},
         cert: der_certificate,
         depth: 10,
-        verify: verify
+        verify: verify,
+        customize_hostname_check: [match_fun: hostname_match_fun]
       ]
 
       subscriptions = adapt_subscription_topics(initial_subscriptions)
