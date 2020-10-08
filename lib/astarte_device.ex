@@ -130,7 +130,7 @@ defmodule Astarte.Device do
   Start an `Astarte.Device`.
 
   ## Device Options
-    * `pairing_url` - URL of the Astarte Pairing API instance the device will connect to, up to (and including) `/v1`. E.g. `https://astarte.api.example.com/pairing/v1` or `http://localhost:4003/v1` for a local installation.
+    * `pairing_url` - base URL of the Astarte Pairing API instance the device will connect to, e.g. `https://astarte.api.example.com/pairing` or `http://localhost:4003` for a local installation.
     * `realm` - Realm which the device belongs to.
     * `device_id` - Device ID of the device. The device ID must be 128-bit long and must be encoded with url-safe base64 without padding. You can generate a random one with `:crypto.strong_rand_bytes(16) |> Base.url_encode64(padding: false)`.
     * `credentials_secret` - The credentials secret obtained when registering the device using Pairing API (to register a device use `Astarte.API.Pairing.Agent.register_device/2` or see https://docs.astarte-platform.org/latest/api/index.html?urls.primaryName=Pairing%20API#/agent/registerDevice).

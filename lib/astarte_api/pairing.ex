@@ -24,7 +24,7 @@ defmodule Astarte.API.Pairing do
   @doc """
   Create a client to access Pairing API.
 
-  `pairing_url` is the URL of the Astarte Pairing API instance the client will connect to, up to (and including) `/v1`. E.g. `https://astarte.api.example.com/pairing/v1` or `http://localhost:4003/v1` for a local installation.
+  `pairing_url` is the base URL of the Astarte Pairing API instance the client will connect to, e.g. `https://astarte.api.example.com/pairing` or `http://localhost:4003` for a local installation.
 
   `realm` is the realm that the API will access
 
@@ -40,7 +40,7 @@ defmodule Astarte.API.Pairing do
         ) ::
           Astarte.API.client()
   def client(pairing_url, realm, opts \\ []) do
-    base_url = Path.join(pairing_url, realm)
+    base_url = Path.join([pairing_url, "v1", realm])
     Astarte.API.client(base_url, opts)
   end
 end
