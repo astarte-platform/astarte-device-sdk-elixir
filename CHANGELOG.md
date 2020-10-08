@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Changed
 - Increase the max certificate chain length to 10.
+- Breaking API change: `pairing_url` now MUST NOT include the `/v1` suffix.
 
 ### Fixed
 - Use a custom check for the hostname so that wildcard SSL certificates are supported.
