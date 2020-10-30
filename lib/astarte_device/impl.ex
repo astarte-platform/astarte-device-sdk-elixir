@@ -263,8 +263,7 @@ defmodule Astarte.Device.Impl do
          :ok <- validate_publish_type(publish_type, interface),
          :ok <- validate_ownership(:device, interface),
          :ok <- validate_path_and_type(interface, path, value),
-         payload_map = build_payload_map(value, opts),
-         {:ok, bson_payload} <- Cyanide.encode(payload_map) do
+         {:ok, payload} <- build_payload(value, opts) do
       publish_opts = Keyword.take(opts, [:qos])
       "/" <> bare_path = path
 
@@ -276,7 +275,7 @@ defmodule Astarte.Device.Impl do
           Enum.join([client_id, interface_name, bare_path], "/")
         end
 
-      @connection.publish_sync(client_id, topic, bson_payload, publish_opts)
+      @connection.publish_sync(client_id, topic, payload, publish_opts)
     end
   end
 
@@ -452,6 +451,16 @@ defmodule Astarte.Device.Impl do
     end
   end
 
+  defp build_payload(nil, _opts) do
+    # If value is nil (which can only happen for an unset), we send an empty binary
+    {:ok, <<>>}
+  end
+
+  defp build_payload(value, opts) do
+    payload_map = build_payload_map(value, opts)
+    Cyanide.encode(payload_map)
+  end
+
   defp validate_publish_type(publish_type, %Interface{type: publish_type}) do
     :ok
   end
@@ -477,10 +486,13 @@ defmodule Astarte.Device.Impl do
   end
 
   defp validate_path_and_type(%Interface{aggregation: :individual} = interface, path, value) do
-    mappings = interface.mappings
+    %Interface{
+      mappings: mappings,
+      type: type
+    } = interface
 
-    with {:ok, %Mapping{value_type: expected_type}} <- find_mapping(path, mappings) do
-      Mapping.ValueType.validate_value(expected_type, value)
+    with {:ok, mapping} <- find_mapping(path, mappings) do
+      validate_value(type, mapping, value)
     end
   end
 
@@ -492,6 +504,19 @@ defmodule Astarte.Device.Impl do
 
   defp validate_path_and_type(%Interface{aggregation: :object}, _invalid_path, _value) do
     {:error, :cannot_resolve_path}
+  end
+
+  defp validate_value(:properties, %Mapping{allow_unset: allow_unset}, nil) do
+    # If value is nil on a properties interface, check if we can unset
+    if allow_unset do
+      :ok
+    else
+      {:error, :unset_not_allowed}
+    end
+  end
+
+  defp validate_value(_type, %Mapping{value_type: expected_type}, value) do
+    Mapping.ValueType.validate_value(expected_type, value)
   end
 
   defp classify_error({:api, {:error, reason}}, log_tag)

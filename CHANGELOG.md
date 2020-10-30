@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 ## Unreleased
 ### Added
 - Make the HTTP client follow redirects when interacting with Pairing API
+- Add `unset_property` function to unset a path on a property interface.
 
 ### Changed
 - Increase the max certificate chain length to 10.

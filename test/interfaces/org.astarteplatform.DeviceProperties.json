@@ -8,6 +8,11 @@
        {
            "endpoint": "/intValue",
            "type": "integer"
+       },
+       {
+           "endpoint": "/stringValue",
+           "type": "string",
+           "allow_unset": true
        }
     ]
 }

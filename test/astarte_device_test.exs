@@ -237,6 +237,48 @@ defmodule Astarte.DeviceTest do
     end
   end
 
+  describe "unset_property" do
+    setup [:set_mox_from_context, :verify_on_exit!, :init_device]
+
+    test "fails on a datastream interface", %{device: device} do
+      interface = "org.astarteplatform.test.DeviceDatastream"
+      path = "/realValue"
+      value = 42.0
+
+      :ok = wait_for_connection()
+
+      assert Device.unset_property(device, interface, path) == {:error, :datastream_interface}
+    end
+
+    test "fails on a property interface without allow_unset", %{device: device} do
+      interface = "org.astarteplatform.test.DeviceProperties"
+      path = "/intValue"
+      value = 42
+
+      :ok = wait_for_connection()
+
+      assert Device.unset_property(device, interface, path) == {:error, :unset_not_allowed}
+    end
+
+    test "succeeds on a property interface", %{device: device} do
+      interface = "org.astarteplatform.test.DeviceProperties"
+      path = "/stringValue"
+      value = 42
+
+      full_path = "#{@realm}/#{@device_id}/#{interface}#{path}"
+
+      ConnectionMock
+      |> expect(:publish_sync, fn _client_id, ^full_path, payload, [qos: 2] ->
+        assert payload == <<>>
+        :ok
+      end)
+
+      :ok = wait_for_connection()
+
+      assert Device.unset_property(device, interface, path) == :ok
+    end
+  end
+
   defp init_device(_) do
     test_process = self()
     introspection_topic = @client_id

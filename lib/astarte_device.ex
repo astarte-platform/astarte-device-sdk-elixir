@@ -277,6 +277,22 @@ defmodule Astarte.Device do
   end
 
   @doc """
+  Unset a property value to Astarte.
+
+  This call is blocking and waits for the message to be ACKed at the MQTT level.
+  """
+  @spec unset_property(
+          pid :: pid(),
+          interface_name :: String.t(),
+          path :: String.t()
+        ) ::
+          :ok
+          | {:error, reason :: term()}
+  def unset_property(pid, interface_name, path) do
+    :gen_statem.call(pid, {:unset_property, interface_name, path})
+  end
+
+  @doc """
   Blocks until the device succesfully connects to the broker, then returns `:ok`.
 
   Useful to ensure the device has established the initial connection before beginning
@@ -536,6 +552,20 @@ defmodule Astarte.Device do
       interface_name: interface_name,
       path: path,
       value: value,
+      opts: [qos: 2]
+    ]
+
+    reply = Impl.publish(publish_params, data)
+    actions = [{:reply, from, reply}]
+    {:keep_state_and_data, actions}
+  end
+
+  def connected({:call, from}, {:unset_property, interface_name, path}, data) do
+    publish_params = [
+      publish_type: :properties,
+      interface_name: interface_name,
+      path: path,
+      value: nil,
       opts: [qos: 2]
     ]
 
