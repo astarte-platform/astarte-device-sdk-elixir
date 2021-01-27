@@ -51,6 +51,8 @@ defmodule Astarte.Device.MixProject do
   defp deps do
     [
       {:astarte_core, "~> 0.11.4"},
+      # Lock gpb to 4.12.0 until this is solved https://github.com/bitwalker/exprotobuf/issues/113
+      {:gpb, "== 4.12.0"},
       {:certifi, "~> 2.5"},
       {:hackney, "~> 1.15"},
       {:jason, "~> 1.1"},
