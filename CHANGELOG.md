@@ -16,6 +16,14 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 ### Fixed
 - Use a custom check for the hostname so that wildcard SSL certificates are supported.
 
+## [0.11.4] - 2021-01-27
+### Fixed
+- Lock gpb to 4.12.0 to fix exprotobuf compilation issue
+
+## [0.11.3] - 2020-09-24
+
+## [0.11.2] - 2020-08-31
+
 ## [0.11.1] - 2020-05-18
 
 ## [0.11.0] - 2020-04-13
