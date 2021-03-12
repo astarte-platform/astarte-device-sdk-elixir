@@ -262,8 +262,7 @@ defmodule Astarte.Device.Impl do
     with {:ok, interface} <- fetch_interface(interface_name, data),
          :ok <- validate_publish_type(publish_type, interface),
          :ok <- validate_ownership(:device, interface),
-         :ok <- validate_path_and_type(interface, path, value),
-         {:ok, payload} <- build_payload(value, opts) do
+         {:ok, payload} <- build_payload(interface, path, value, opts) do
       publish_opts = Keyword.take(opts, [:qos])
       "/" <> bare_path = path
 
@@ -441,6 +440,26 @@ defmodule Astarte.Device.Impl do
     end
   end
 
+  defp normalize_object_values(mappings_map, values_map) do
+    for {key, value} <- values_map, into: %{} do
+      # values_map can have atom keys, normalize to string
+      string_key = to_string(key)
+      %Mapping{value_type: type} = Map.get(mappings_map, string_key)
+      {key, normalize_value(type, value)}
+    end
+  end
+
+  defp normalize_value(:binaryblob, value) when is_binary(value) do
+    # Normalize binaryblob to BSON binary format
+    # TODO: change this to the new Cyanide.Binary type when cyanide is
+    # upgraded
+    {0, value}
+  end
+
+  defp normalize_value(_expected_type, value) do
+    value
+  end
+
   defp build_payload_map(value, opts) do
     case Keyword.fetch(opts, :timestamp) do
       {:ok, %DateTime{} = timestamp} ->
@@ -451,14 +470,50 @@ defmodule Astarte.Device.Impl do
     end
   end
 
-  defp build_payload(nil, _opts) do
+  defp encode_value(nil, _opts) do
     # If value is nil (which can only happen for an unset), we send an empty binary
     {:ok, <<>>}
   end
 
-  defp build_payload(value, opts) do
+  defp encode_value(value, opts) do
     payload_map = build_payload_map(value, opts)
     Cyanide.encode(payload_map)
+  end
+
+  defp validate_object_path(mappings_map, path) do
+    # Check erroneous path prefix/suffix that would introduce corner cases in the check
+    if not String.starts_with?(path, "/") or String.ends_with?(path, "/") do
+      {:error, :invalid_path}
+    else
+      # We take the endpoint from the first mapping since they all have the same prefix
+      [{_k, %Mapping{endpoint: endpoint}}] = Enum.take(mappings_map, 1)
+
+      path_tokens = String.split(path, "/", trim: true)
+
+      # We drop the last endpoint token since that's the key in the values map
+      endpoint_tokens =
+        endpoint
+        |> String.split("/", trim: true)
+        |> Enum.reverse()
+        |> tl()
+        |> Enum.reverse()
+
+      validate_object_path_tokens(endpoint_tokens, path_tokens)
+    end
+  end
+
+  defp validate_object_path_tokens(endpoint_tokens, path_tokens)
+       when length(endpoint_tokens) == length(path_tokens) do
+    Enum.zip(endpoint_tokens, path_tokens)
+    |> Enum.reduce_while(:ok, fn
+      {"%{" <> _parametric_token, _any_path_token}, :ok -> {:cont, :ok}
+      {same_token, same_token}, :ok -> {:cont, :ok}
+      _other, _acc -> {:halt, {:error, :invalid_path}}
+    end)
+  end
+
+  defp validate_object_path_tokens(_endpoint_tokens, _path_tokens) do
+    {:error, :invalid_path}
   end
 
   defp validate_publish_type(publish_type, %Interface{type: publish_type}) do
@@ -485,25 +540,59 @@ defmodule Astarte.Device.Impl do
     {:error, :device_owned_interface}
   end
 
-  defp validate_path_and_type(%Interface{aggregation: :individual} = interface, path, value) do
+  defp build_payload(%Interface{aggregation: :individual} = interface, path, value, opts) do
     %Interface{
       mappings: mappings,
       type: type
     } = interface
 
-    with {:ok, mapping} <- find_mapping(path, mappings) do
-      validate_value(type, mapping, value)
+    with {:ok, mapping} <- find_mapping(path, mappings),
+         :ok <- validate_value(type, mapping, value) do
+      normalized_value = normalize_value(mapping.value_type, value)
+      encode_value(normalized_value, opts)
     end
   end
 
-  defp validate_path_and_type(%Interface{aggregation: :object}, "/" <> _bare_path, _value) do
-    # TODO: validate object aggregation interfaces, currently it just checks
-    # that the path begins with /
-    :ok
+  defp build_payload(%Interface{aggregation: :object} = interface, path, values_map, opts) do
+    %Interface{
+      mappings: mappings
+    } = interface
+
+    mappings_map = build_aggregate_mappings_map(mappings)
+
+    with :ok <- validate_object_path(mappings_map, path),
+         :ok <- validate_object_values(mappings_map, values_map) do
+      normalized_values = normalize_object_values(mappings_map, values_map)
+      encode_value(normalized_values, opts)
+    end
   end
 
-  defp validate_path_and_type(%Interface{aggregation: :object}, _invalid_path, _value) do
-    {:error, :cannot_resolve_path}
+  defp build_aggregate_mappings_map(mappings) do
+    for %Mapping{endpoint: endpoint} = mapping <- mappings, into: %{} do
+      # We use the last endpoint token as key, which is what is also contained in the values map as key
+      value_key = String.split(endpoint, "/") |> List.last()
+
+      {value_key, mapping}
+    end
+  end
+
+  defp validate_object_values(mappings_map, values_map) do
+    Enum.reduce_while(values_map, :ok, fn {key, value}, :ok ->
+      # values_map can have atom keys, normalize to string
+      string_key = to_string(key)
+
+      with {:ok, %Mapping{value_type: expected_type}} <- Map.fetch(mappings_map, string_key),
+           :ok <- Mapping.ValueType.validate_value(expected_type, value) do
+        {:cont, :ok}
+      else
+        :error ->
+          # Key in values map is not in mappings
+          {:halt, {:error, :unexpected_object_key}}
+
+        {:error, reason} ->
+          {:halt, {:error, reason}}
+      end
+    end)
   end
 
   defp validate_value(:properties, %Mapping{allow_unset: allow_unset}, nil) do
