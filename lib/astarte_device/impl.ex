@@ -392,11 +392,11 @@ defmodule Astarte.Device.Impl do
   end
 
   defp build_subscriptions(client_id, server_interfaces) do
-    control_topic_subscription = "#{client_id}/control/#"
+    control_topic_subscription = "#{client_id}/control/consumer/properties"
 
     interface_topic_subscriptions =
-      Enum.flat_map(server_interfaces, fn %Interface{name: interface_name} ->
-        ["#{client_id}/#{interface_name}", "#{client_id}/#{interface_name}/#"]
+      Enum.map(server_interfaces, fn %Interface{name: interface_name} ->
+        "#{client_id}/#{interface_name}/#"
       end)
 
     [control_topic_subscription | interface_topic_subscriptions]
