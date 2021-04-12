@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.0] - Unreleased
+### Changed
+- Standardize subscriptions (see
+  [astarte-platform/astarte#568](https://github.com/astarte-platform/astarte/issues/568)). This
+  reduces the network bandwidth usage.
+
 ## [1.0.0-beta.2] - 2021-03-23
 ### Added
 - Add validation when publishing on object aggregate interfaces.
