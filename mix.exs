@@ -22,7 +22,7 @@ defmodule Astarte.Device.MixProject do
   def project do
     [
       app: :astarte_device,
-      version: "1.0.0-beta.2",
+      version: "1.0.0-rc.0",
       elixir: "~> 1.11",
       start_permanent: Mix.env() == :prod,
       test_coverage: [tool: ExCoveralls],
@@ -50,7 +50,7 @@ defmodule Astarte.Device.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:astarte_core, "~> 1.0.0-beta.2"},
+      {:astarte_core, "~> 1.0.0-rc.0"},
       {:certifi, "~> 2.5"},
       {:hackney, "~> 1.15"},
       {:jason, "~> 1.1"},
