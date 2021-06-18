@@ -67,6 +67,13 @@ defmodule Astarte.API do
     |> to_map()
   end
 
+  @spec delete(client :: Astarte.API.client(), url :: String.t()) ::
+          Astarte.API.result()
+  def delete(client, url) do
+    Tesla.delete(client, url)
+    |> to_map()
+  end
+
   @spec to_map(Tesla.Env.result()) :: Astarte.API.result()
   defp to_map({:ok, %Tesla.Env{status: status, headers: headers, body: body}}) do
     {:ok, %{status: status, headers: headers, body: body}}

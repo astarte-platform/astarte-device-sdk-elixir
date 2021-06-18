@@ -29,6 +29,12 @@ defmodule Astarte.API.Pairing.Agent do
                 client :: Astarte.API.client(),
                 device_id :: String.t()
               ) :: Astarte.API.result()
+
+    @callback unregister_device(
+                client :: Astarte.API.client(),
+                device_id :: String.t()
+              ) ::
+                Astarte.API.result()
   end
 
   @behaviour Astarte.API.Pairing.Agent.Behaviour
@@ -51,5 +57,26 @@ defmodule Astarte.API.Pairing.Agent do
     body = %{data: %{hw_id: device_id}}
 
     Astarte.API.post(client, url, body)
+  end
+
+  @doc """
+  Unregisters a device.
+   This makes it possible to register it again, even if it already has requested its credentials.
+   All data belonging to the device will be kept as is.
+
+  `client` is a Pairing API client created with `Astarte.API.Pairing.client/3`.
+
+  `device_id` is the device id of a registered Astarte device.`
+
+  ## Return values
+    * `{:ok, result}` if the HTTP request can be performed. `result` will be a map with `status`, `headers` and `body`.
+    * `{:error, reason}` if the HTTP request can't be performed.
+  """
+  @spec unregister_device(client :: Astarte.API.client(), device_id :: String.t()) ::
+          Astarte.API.result()
+  def unregister_device(client, device_id) do
+    url = "/agent/devices/#{device_id}"
+
+    Astarte.API.delete(client, url)
   end
 end
