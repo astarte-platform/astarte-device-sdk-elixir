@@ -23,8 +23,12 @@ defmodule Astarte.Device do
 
   @behaviour :gen_statem
 
+  use Bitwise, only_operators: true
   require Logger
   alias Astarte.Device.Impl
+
+  @backoff_randomization_factor 0.25
+  @max_backoff_exponent 9
 
   defmodule Data do
     @moduledoc false
@@ -329,7 +333,7 @@ defmodule Astarte.Device do
 
     case Impl.init(new_opts) do
       {:ok, new_data} ->
-        actions = [{:next_event, :internal, :request_info}]
+        actions = [{:next_event, :internal, {:request_info, 0}}]
         {:ok, :waiting_for_info, new_data, actions}
 
       {:no_keypair, new_data} ->
@@ -337,7 +341,7 @@ defmodule Astarte.Device do
         {:ok, :no_keypair, new_data, actions}
 
       {:no_certificate, new_data} ->
-        actions = [{:next_event, :internal, :request_certificate}]
+        actions = [{:next_event, :internal, {:request_certificate, 0}}]
         {:ok, :no_certificate, new_data, actions}
     end
   end
@@ -345,7 +349,7 @@ defmodule Astarte.Device do
   def no_keypair(:internal, :generate_keypair, data) do
     case Impl.generate_keypair(data) do
       {:ok, new_data} ->
-        actions = [{:next_event, :internal, :request_certificate}]
+        actions = [{:next_event, :internal, {:request_certificate, 0}}]
         {:next_state, :no_certificate, new_data, actions}
 
       {:error, reason} ->
@@ -363,16 +367,24 @@ defmodule Astarte.Device do
     handle_disconnected_publish(from)
   end
 
-  def no_certificate(:internal, :request_certificate, data) do
+  def no_certificate(:internal, {:request_certificate, current_attempt}, data) do
     case Impl.request_certificate(data) do
       {:ok, new_data} ->
-        actions = [{:next_event, :internal, :request_info}]
+        actions = [{:next_event, :internal, {:request_info, 0}}]
         {:next_state, :waiting_for_info, new_data, actions}
 
       {:error, :temporary} ->
-        # TODO: exponential backoff
-        actions = [{:state_timeout, 30_000, :retry_request_certificate}]
-        _ = Logger.warn("Trying again in 30 seconds")
+        backoff_time = compute_backoff_time(current_attempt)
+
+        next_attempt =
+          if current_attempt < @max_backoff_exponent do
+            current_attempt + 1
+          else
+            current_attempt
+          end
+
+        actions = [{:state_timeout, backoff_time, {:retry_request_certificate, next_attempt}}]
+        _ = Logger.warn("Trying again in #{backoff_time} ms")
         {:keep_state_and_data, actions}
 
       {:error, reason} ->
@@ -380,8 +392,8 @@ defmodule Astarte.Device do
     end
   end
 
-  def no_certificate(:state_timeout, :retry_request_certificate, _data) do
-    actions = [{:next_event, :internal, :request_certificate}]
+  def no_certificate(:state_timeout, {:retry_request_certificate, current_attempt}, _data) do
+    actions = [{:next_event, :internal, {:request_certificate, current_attempt}}]
     {:keep_state_and_data, actions}
   end
 
@@ -393,16 +405,24 @@ defmodule Astarte.Device do
     handle_disconnected_publish(from)
   end
 
-  def waiting_for_info(:internal, :request_info, data) do
+  def waiting_for_info(:internal, {:request_info, current_attempt}, data) do
     case Impl.request_info(data) do
       {:ok, new_data} ->
         actions = [{:next_event, :internal, :connect}]
         {:next_state, :disconnected, new_data, actions}
 
       {:error, :temporary} ->
-        # TODO: exponential backoff
-        actions = [{:state_timeout, 30_000, :retry_request_info}]
-        _ = Logger.warn("Trying again in 30 seconds")
+        backoff_time = compute_backoff_time(current_attempt)
+
+        next_attempt =
+          if current_attempt < @max_backoff_exponent do
+            current_attempt + 1
+          else
+            current_attempt
+          end
+
+        actions = [{:state_timeout, backoff_time, {:retry_request_info, next_attempt}}]
+        _ = Logger.warn("Trying again in #{backoff_time} ms")
         {:keep_state_and_data, actions}
 
       {:error, reason} ->
@@ -410,8 +430,8 @@ defmodule Astarte.Device do
     end
   end
 
-  def waiting_for_info(:state_timeout, :retry_request_info, _data) do
-    actions = [{:next_event, :internal, :request_info}]
+  def waiting_for_info(:state_timeout, {:retry_request_info, current_attempt}, _data) do
+    actions = [{:next_event, :internal, {:request_info, current_attempt}}]
     {:keep_state_and_data, actions}
   end
 
@@ -587,5 +607,10 @@ defmodule Astarte.Device do
   defp handle_disconnected_publish(from) do
     actions = [{:reply, from, {:error, :device_disconnected}}]
     {:keep_state_and_data, actions}
+  end
+
+  defp compute_backoff_time(current_attempt) do
+    minimum_duration = (1 <<< current_attempt) * 1000
+    minimum_duration + round(minimum_duration * @backoff_randomization_factor * :rand.uniform())
   end
 end
