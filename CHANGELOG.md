@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 ### Added
 - Add `unregister_device` to unregister a device, allowing to register it again. 
 
+### Changed
+- Request backoff time for info and certificate request is exponential instead of fixed.
+
 ## [1.0.0-rc.0] - 2021-05-05
 ### Changed
 - Standardize subscriptions (see
