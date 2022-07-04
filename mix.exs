@@ -50,7 +50,7 @@ defmodule Astarte.Device.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:astarte_core, "~> 1.0.2"},
+      {:astarte_core, "~> 1.0.3"},
       {:certifi, "~> 2.5"},
       {:hackney, "~> 1.15"},
       {:jason, "~> 1.1"},
