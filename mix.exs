@@ -22,7 +22,7 @@ defmodule Astarte.Device.MixProject do
   def project do
     [
       app: :astarte_device,
-      version: "1.0.3",
+      version: "1.0.4",
       elixir: "~> 1.11",
       start_permanent: Mix.env() == :prod,
       test_coverage: [tool: ExCoveralls],
