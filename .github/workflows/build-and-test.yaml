@@ -18,7 +18,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
-name: Build and Test
+name: CI
 
 on:
   # Run when pushing to stable branches
@@ -31,21 +31,127 @@ on:
   # Run on pull requests
   pull_request:
 
-env:
-  elixir_version: "1.15.4"
-  otp_version: "26.0.2"
-
 jobs:
-  build:
-    name: Build
+  lint:
+    name: Lint
     runs-on: ubuntu-22.04
+    env:
+      MIX_ENV: test
+
     steps:
-    - uses: actions/checkout@v3
-    - uses: erlef/setup-beam@v1
+    - name: Clone the repository
+      uses: actions/checkout@v3
+
+    - name: Install OTP and Elixir
+      uses: erlef/setup-beam@v1
+      id: beam
       with:
-        otp-version: ${{ env.otp_version }}
-        elixir-version: ${{ env.elixir_version }}
-    - name: Install Dependencies
-      run: mix deps.get
+        version-file: .tool-versions
+        version-type: strict
+
+    - name: Cache dependencies
+      id: cache-deps
+      uses: actions/cache@v3
+      with:
+        path: |
+          deps
+          _build
+        key: "${{ runner.os }}-\
+              otp-${{ steps.beam.outputs.otp-version }}-\
+              elixir-${{ steps.beam.outputs.elixir-version }}-\
+              ${{ hashFiles('mix.lock') }}-\
+              ${{ env.MIX_ENV }}"
+
+    - name: Install and compile dependencies
+      if: steps.cache-deps.outputs.cache-hit != 'true'
+      run: |
+        mix deps.get --only test
+        mix deps.compile
+
+    - name: Check formatting
+      run: mix format --check-formatted
+
+    - name: Check for unused dependencies
+      run: mix do deps.get, deps.unlock --check-unused
+
+    - name: Compile with --warnings-as-errors
+      run: mix compile --warnings-as-errors --force
+
+    # TODO: add `mix dialyzer` when we fix all of its errors
+
+  test-coverage:
+    name: Build and Test
+    runs-on: ubuntu-22.04
+    env:
+      MIX_ENV: test
+
+    steps:
+    - name: Clone the repository
+      uses: actions/checkout@v3
+
+    - name: Install OTP and Elixir
+      uses: erlef/setup-beam@v1
+      id: beam
+      with:
+        version-file: .tool-versions
+        version-type: strict
+
+    - name: Cache dependencies
+      id: cache-deps
+      uses: actions/cache@v3
+      with:
+        path: |
+          deps
+          _build
+        key: "${{ runner.os }}-\
+              otp-${{ steps.beam.outputs.otp-version }}-\
+              elixir-${{ steps.beam.outputs.elixir-version }}-\
+              ${{ hashFiles('mix.lock') }}-\
+              ${{ env.MIX_ENV }}"
+
+    - name: Install and compile dependencies
+      if: steps.cache-deps.outputs.cache-hit != 'true'
+      run: |
+        mix deps.get --only test
+        mix deps.compile
+
+    - name: Test
+      run: mix test
+
+  prod_compile:
+    name: Compile in prod env
+    runs-on: ubuntu-22.04
+    env:
+      MIX_ENV: prod
+    steps:
+    - name: Clone the repository
+      uses: actions/checkout@v3
+
+    - name: Install OTP and Elixir
+      uses: erlef/setup-beam@v1
+      id: beam
+      with:
+        version-file: .tool-versions
+        version-type: strict
+
+    - name: Cache dependencies
+      id: cache-deps
+      uses: actions/cache@v3
+      with:
+        path: |
+          deps
+          _build
+        key: "${{ runner.os }}-\
+              otp-${{ steps.beam.outputs.otp-version }}-\
+              elixir-${{ steps.beam.outputs.elixir-version }}-\
+              ${{ hashFiles('mix.lock') }}-\
+              ${{ env.MIX_ENV }}"
+
+    - name: Install and compile dependencies
+      if: steps.cache-deps.outputs.cache-hit != 'true'
+      run: |
+        mix deps.get --only prod
+        mix deps.compile
+
     - name: Compile
-      run: mix compile
+      run: mix compile --warnings-as-errors
