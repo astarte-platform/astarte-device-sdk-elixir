@@ -59,7 +59,7 @@ defmodule Astarte.Device.MixProject do
       {:x509, "~> 0.5"},
       {:excoveralls, "~> 0.11.1", only: :test},
       {:ex_doc, ">= 0.0.0", only: :dev, runtime: false},
-      {:mox, "~> 0.5", only: :test},
+      {:mox, "~> 1.0", only: :test},
       {:dialyzex, "~> 1.2.0", only: :dev}
     ]
   end
