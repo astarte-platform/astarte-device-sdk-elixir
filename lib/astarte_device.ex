@@ -538,9 +538,6 @@ defmodule Astarte.Device do
       :ok ->
         :keep_state_and_data
 
-      {:ok, new_data} ->
-        {:keep_state, new_data}
-
       {:error, reason} ->
         Logger.warning("#{client_id}: error in handle_message #{inspect(reason)}")
         :keep_state_and_data
