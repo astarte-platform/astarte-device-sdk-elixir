@@ -194,7 +194,7 @@ defmodule Astarte.DeviceTest do
 
       ConnectionMock
       |> expect(:publish_sync, fn _client_id, ^full_path, bson_value, [] ->
-        assert %{"v" => value} = Cyanide.decode!(bson_value)
+        assert %{"v" => ^value} = Cyanide.decode!(bson_value)
         :ok
       end)
 
@@ -227,7 +227,7 @@ defmodule Astarte.DeviceTest do
 
       ConnectionMock
       |> expect(:publish_sync, fn _client_id, ^full_path, bson_value, [qos: 2] ->
-        assert %{"v" => value} = Cyanide.decode!(bson_value)
+        assert %{"v" => ^value} = Cyanide.decode!(bson_value)
         :ok
       end)
 
@@ -243,7 +243,6 @@ defmodule Astarte.DeviceTest do
     test "fails on a datastream interface", %{device: device} do
       interface = "org.astarteplatform.test.DeviceDatastream"
       path = "/realValue"
-      value = 42.0
 
       :ok = wait_for_connection()
 
@@ -253,7 +252,6 @@ defmodule Astarte.DeviceTest do
     test "fails on a property interface without allow_unset", %{device: device} do
       interface = "org.astarteplatform.test.DeviceProperties"
       path = "/intValue"
-      value = 42
 
       :ok = wait_for_connection()
 
@@ -263,7 +261,6 @@ defmodule Astarte.DeviceTest do
     test "succeeds on a property interface", %{device: device} do
       interface = "org.astarteplatform.test.DeviceProperties"
       path = "/stringValue"
-      value = 42
 
       full_path = "#{@realm}/#{@device_id}/#{interface}#{path}"
 
