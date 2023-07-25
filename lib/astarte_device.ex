@@ -258,7 +258,7 @@ defmodule Astarte.Device do
           :ok
           | {:error, reason :: term()}
         when options: [option],
-             option: {:qos, qos :: Tortoise.qos()} | {:timestamp, timestamp :: DateTime.t()}
+             option: {:qos, qos :: Tortoise311.qos()} | {:timestamp, timestamp :: DateTime.t()}
   def send_datastream(pid, interface_name, path, value, opts \\ []) do
     :gen_statem.call(pid, {:send_datastream, interface_name, path, value, opts})
   end
@@ -523,7 +523,7 @@ defmodule Astarte.Device do
   end
 
   def connected(:cast, {:connection_status, :down}, %Data{client_id: client_id} = data) do
-    # Tortoise will reconnect for us, just go to the :connecting state
+    # Tortoise311 will reconnect for us, just go to the :connecting state
     _ = Logger.info("#{client_id}: Disconnected. Retrying connection...")
 
     {:next_state, :connecting, data}

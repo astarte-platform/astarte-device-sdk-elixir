@@ -1,7 +1,7 @@
 #
 # This file is part of Astarte.
 #
-# Copyright 2019 Ispirata Srl
+# Copyright 2019-2023 SECO Mind Srl
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@
 # limitations under the License.
 #
 
-defmodule Astarte.Device.TortoiseConnection do
+defmodule Astarte.Device.Tortoise311Connection do
   @moduledoc false
 
   @behaviour Astarte.Device.Connection
@@ -61,12 +61,12 @@ defmodule Astarte.Device.TortoiseConnection do
 
       tortoise_opts = [
         client_id: client_id,
-        handler: {Astarte.Device.TortoiseHandler, device_pid: self()},
-        server: {Tortoise.Transport.SSL, server_opts},
+        handler: {Astarte.Device.Tortoise311Handler, device_pid: self()},
+        server: {Tortoise311.Transport.SSL, server_opts},
         subscriptions: subscriptions
       ]
 
-      Tortoise.Connection.start_link(tortoise_opts)
+      Tortoise311.Connection.start_link(tortoise_opts)
     else
       :error ->
         {:error, :invalid_args}
@@ -82,7 +82,7 @@ defmodule Astarte.Device.TortoiseConnection do
   @impl true
   def subscribe_sync(client_id, topics) do
     subscriptions = adapt_subscription_topics(topics)
-    Tortoise.Connection.subscribe_sync(client_id, subscriptions)
+    Tortoise311.Connection.subscribe_sync(client_id, subscriptions)
   end
 
   defp adapt_subscription_topics(topics) do
@@ -92,5 +92,5 @@ defmodule Astarte.Device.TortoiseConnection do
   end
 
   @impl true
-  defdelegate publish_sync(client_id, topic, payload, opts \\ []), to: Tortoise
+  defdelegate publish_sync(client_id, topic, payload, opts \\ []), to: Tortoise311
 end
