@@ -35,7 +35,7 @@ defmodule Astarte.Device.MixProject do
       deps: deps(),
       package: package(),
       elixirc_paths: elixirc_paths(Mix.env()),
-      dialyzer_ignored_warnings: dialyzer_ignored_warnings()
+      dialyzer: dialyzer_opts(Mix.env())
     ]
   end
 
@@ -60,26 +60,21 @@ defmodule Astarte.Device.MixProject do
       {:excoveralls, "~> 0.11.1", only: :test},
       {:ex_doc, ">= 0.0.0", only: :dev, runtime: false},
       {:mox, "~> 1.0", only: :test},
-      {:dialyzex, "~> 1.2.0", only: :dev}
+      {:dialyxir, "~> 1.3.0", only: [:dev, :test]}
     ]
   end
 
   defp elixirc_paths(:test), do: ["test/support", "lib"]
   defp elixirc_paths(_), do: ["lib"]
 
-  defp dialyzer_ignored_warnings do
+  defp dialyzer_opts(:test) do
     [
-      {:warn_matching, {~c"lib/astarte_device/handler.ex", 82},
-       {:pattern_match, [~c"pattern {'error', __@7}", ~c"{'ok','nil'}"]}},
-      # Remove when this https://github.com/gausby/tortoise/pull/110 gets merged
-      {:warn_matching, {~c"lib/astarte_device/impl.ex", :_},
-       {:pattern_match,
-        [
-          ~c"pattern {'ok', _pid@1}",
-          ~c"{'error','invalid_args' | 'invalid_certificate' | 'invalid_private_key'}"
-        ]}}
+      plt_file: {:no_warn, "priv/plts/dialyzer.plt"},
+      plt_add_apps: [:ex_unit]
     ]
   end
+
+  defp dialyzer_opts(_env), do: []
 
   defp package do
     [
