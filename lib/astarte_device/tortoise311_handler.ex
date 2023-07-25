@@ -1,7 +1,7 @@
 #
 # This file is part of Astarte.
 #
-# Copyright 2019 Ispirata Srl
+# Copyright 2019-2023 SECO Mind Srl
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,11 +16,11 @@
 # limitations under the License.
 #
 
-defmodule Astarte.Device.TortoiseHandler do
+defmodule Astarte.Device.Tortoise311Handler do
   @moduledoc false
 
   require Logger
-  use Tortoise.Handler
+  use Tortoise311.Handler
 
   @impl true
   def init(args) do

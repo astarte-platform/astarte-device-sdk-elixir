@@ -25,7 +25,7 @@ defmodule Astarte.Device.Impl do
   @connection Application.compile_env(
                 :astarte_device,
                 :connection_mod,
-                Astarte.Device.TortoiseConnection
+                Astarte.Device.Tortoise311Connection
               )
   @pairing_devices Application.compile_env(
                      :astarte_device,
