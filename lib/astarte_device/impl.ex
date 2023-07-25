@@ -22,12 +22,12 @@ defmodule Astarte.Device.Impl do
   require Logger
 
   # Mockable modules
-  @connection Application.get_env(
+  @connection Application.compile_env(
                 :astarte_device,
                 :connection_mod,
                 Astarte.Device.TortoiseConnection
               )
-  @pairing_devices Application.get_env(
+  @pairing_devices Application.compile_env(
                      :astarte_device,
                      :pairing_devices_mod,
                      Astarte.API.Pairing.Devices
@@ -341,7 +341,7 @@ defmodule Astarte.Device.Impl do
 
       other_topic_tokens ->
         _ =
-          Logger.warn(
+          Logger.warning(
             "#{client_id}: received message on unhandled topic #{Path.join(other_topic_tokens)}"
           )
 
@@ -362,9 +362,7 @@ defmodule Astarte.Device.Impl do
     # TODO: handle control messages
     _ =
       Logger.info(
-        "#{client_id}: received control message, control_path_tokens=#{
-          inspect(control_path_tokens)
-        }, payload=#{inspect(payload)}"
+        "#{client_id}: received control message, control_path_tokens=#{inspect(control_path_tokens)}, payload=#{inspect(payload)}"
       )
 
     :ok
@@ -611,20 +609,20 @@ defmodule Astarte.Device.Impl do
   defp classify_error({:api, {:error, reason}}, log_tag)
        when reason in [:econnrefused, :closed, :timeout] do
     # Temporary errors
-    _ = Logger.warn("#{log_tag}: Temporary failure in API request: #{inspect(reason)}.")
+    _ = Logger.warning("#{log_tag}: Temporary failure in API request: #{inspect(reason)}.")
     {:error, :temporary}
   end
 
   defp classify_error({:api, {:error, reason}}, log_tag) do
     # Other errors are assumed to be permanent
-    _ = Logger.warn("#{log_tag}: Failure in API request: #{inspect(reason)}.")
+    _ = Logger.warning("#{log_tag}: Failure in API request: #{inspect(reason)}.")
     {:error, reason}
   end
 
   defp classify_error({:api, {:ok, %{status: status, body: body}}}, log_tag)
        when status >= 500 do
     # We assume Server Errors in the 500 range are temporary
-    _ = Logger.warn("#{log_tag}: API request failed with status #{status}: #{inspect(body)}.")
+    _ = Logger.warning("#{log_tag}: API request failed with status #{status}: #{inspect(body)}.")
 
     {:error, :temporary}
   end
@@ -632,14 +630,14 @@ defmodule Astarte.Device.Impl do
   defp classify_error({:api, {:ok, %{status: status, body: body}}}, log_tag)
        when status >= 400 and status < 500 do
     # All HTTP errors in the 400 range are assumed to be permanent (authentication, bad request etc)
-    _ = Logger.warn("#{log_tag}: API request failed with status #{status}: #{inspect(body)}.")
+    _ = Logger.warning("#{log_tag}: API request failed with status #{status}: #{inspect(body)}.")
 
     {:error, :request_certificate_failed}
   end
 
   defp classify_error({:store, {:error, reason}}, log_tag) do
     # Storage errors are assumed to be permanent
-    _ = Logger.warn("#{log_tag}: failed to store credentials")
+    _ = Logger.warning("#{log_tag}: failed to store credentials")
     {:error, reason}
   end
 end

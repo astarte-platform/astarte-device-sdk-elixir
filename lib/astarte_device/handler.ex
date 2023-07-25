@@ -1,7 +1,7 @@
 #
 # This file is part of Astarte.
 #
-# Copyright 2019 Ispirata Srl
+# Copyright 2019-2023 SECO Mind Srl
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -108,7 +108,9 @@ defmodule Astarte.Device.Handler do
             %{state | user_state: new_user_state}
           else
             {:error, reason} ->
-              _ = Logger.warn("#{realm}/#{device_id}: error handling message #{inspect(reason)}")
+              _ =
+                Logger.warning("#{realm}/#{device_id}: error handling message #{inspect(reason)}")
+
               state
           end
 

@@ -1,7 +1,7 @@
 #
 # This file is part of Astarte.
 #
-# Copyright 2019 Ispirata Srl
+# Copyright 2019-2023 SECO Mind Srl
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -77,11 +77,11 @@ defmodule Astarte.Device.FilesystemInterfaceProvider do
       {:ok, interface}
     else
       {:error, %Ecto.Changeset{errors: errors}} ->
-        _ = Logger.warn("Invalid interface #{file_path}: #{inspect(errors)}")
+        _ = Logger.warning("Invalid interface #{file_path}: #{inspect(errors)}")
         :error
 
       {:error, reason} ->
-        _ = Logger.warn("Problem loading interface #{file_path}: #{inspect(reason)}")
+        _ = Logger.warning("Problem loading interface #{file_path}: #{inspect(reason)}")
         :error
     end
   end

@@ -1,7 +1,7 @@
 #
 # This file is part of Astarte.
 #
-# Copyright 2020 Ispirata Srl
+# Copyright 2020-2023 SECO Mind Srl
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -63,7 +63,7 @@ defmodule Astarte.Device.SimpleInterfaceProvider do
         {:ok, interface}
 
       {:error, %Ecto.Changeset{errors: errors}} ->
-        _ = Logger.warn("Invalid interface map #{inspect(interface_map)}: #{inspect(errors)}")
+        _ = Logger.warning("Invalid interface map #{inspect(interface_map)}: #{inspect(errors)}")
         {:error, :invalid_interface}
     end
   end

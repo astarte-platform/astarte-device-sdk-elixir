@@ -1,7 +1,7 @@
 #
 # This file is part of Astarte.
 #
-# Copyright 2019 Ispirata Srl
+# Copyright 2019-2023 SECO Mind Srl
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ defmodule Astarte.Device do
 
   @behaviour :gen_statem
 
-  use Bitwise, only_operators: true
+  import Bitwise
   require Logger
   alias Astarte.Device.Impl
 
@@ -197,13 +197,13 @@ defmodule Astarte.Device do
       :gen_statem.start_link(via_tuple(realm, device_id), __MODULE__, opts, [])
     else
       {:device_id, _} ->
-        _ = Logger.warn("#{client_id}: Invalid device_id: #{device_id}")
+        _ = Logger.warning("#{client_id}: Invalid device_id: #{device_id}")
 
         {:error, :invalid_device_id}
 
       {:cred, {:error, reason}} ->
         _ =
-          Logger.warn(
+          Logger.warning(
             "#{client_id}: Can't initialize CredentialStorage for #{client_id}: #{inspect(reason)}"
           )
 
@@ -211,7 +211,7 @@ defmodule Astarte.Device do
 
       {:interface, {:error, reason}} ->
         _ =
-          Logger.warn(
+          Logger.warning(
             "#{client_id}: Can't initialize InterfaceProvider for #{client_id}: #{inspect(reason)}"
           )
 
@@ -384,7 +384,7 @@ defmodule Astarte.Device do
           end
 
         actions = [{:state_timeout, backoff_time, {:retry_request_certificate, next_attempt}}]
-        _ = Logger.warn("Trying again in #{backoff_time} ms")
+        _ = Logger.warning("Trying again in #{backoff_time} ms")
         {:keep_state_and_data, actions}
 
       {:error, reason} ->
@@ -422,7 +422,7 @@ defmodule Astarte.Device do
           end
 
         actions = [{:state_timeout, backoff_time, {:retry_request_info, next_attempt}}]
-        _ = Logger.warn("Trying again in #{backoff_time} ms")
+        _ = Logger.warning("Trying again in #{backoff_time} ms")
         {:keep_state_and_data, actions}
 
       {:error, reason} ->
@@ -542,7 +542,7 @@ defmodule Astarte.Device do
         {:keep_state, new_data}
 
       {:error, reason} ->
-        Logger.warn("#{client_id}: error in handle_message #{inspect(reason)}")
+        Logger.warning("#{client_id}: error in handle_message #{inspect(reason)}")
         :keep_state_and_data
     end
   end

@@ -1,7 +1,7 @@
 #
 # This file is part of Astarte.
 #
-# Copyright 2018-2022 Ispirata Srl
+# Copyright 2018-2023 SECO Mind Srl
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -69,14 +69,14 @@ defmodule Astarte.Device.MixProject do
 
   defp dialyzer_ignored_warnings do
     [
-      {:warn_matching, {'lib/astarte_device/handler.ex', 82},
-       {:pattern_match, ['pattern {\'error\', __@7}', '{\'ok\',\'nil\'}']}},
+      {:warn_matching, {~c"lib/astarte_device/handler.ex", 82},
+       {:pattern_match, [~c"pattern {'error', __@7}", ~c"{'ok','nil'}"]}},
       # Remove when this https://github.com/gausby/tortoise/pull/110 gets merged
-      {:warn_matching, {'lib/astarte_device/impl.ex', :_},
+      {:warn_matching, {~c"lib/astarte_device/impl.ex", :_},
        {:pattern_match,
         [
-          'pattern {\'ok\', _pid@1}',
-          '{\'error\',\'invalid_args\' | \'invalid_certificate\' | \'invalid_private_key\'}'
+          ~c"pattern {'ok', _pid@1}",
+          ~c"{'error','invalid_args' | 'invalid_certificate' | 'invalid_private_key'}"
         ]}}
     ]
   end
