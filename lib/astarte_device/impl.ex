@@ -373,18 +373,44 @@ defmodule Astarte.Device.Impl do
       handler_pid: handler_pid
     } = data
 
-    path = "/" <> Path.join(path_tokens)
-
     # TODO: persist the message to avoid losing it in case of a crash
 
     with {:ok, interface} <- fetch_interface(interface_name, data),
-         :ok <- validate_ownership(:server, interface),
-         mappings = interface.mappings,
-         {:ok, %Mapping{value_type: expected_type}} <- find_mapping(path, mappings),
+         :ok <- validate_ownership(:server, interface) do
+      do_handle_data_message(interface, path_tokens, payload, handler_pid)
+    end
+  end
+
+  defp do_handle_data_message(
+         %{aggregation: :individual} = interface,
+         path_tokens,
+         payload,
+         handler_pid
+       ) do
+    path = "/" <> Path.join(path_tokens)
+    mappings = interface.mappings
+
+    with {:ok, %Mapping{value_type: expected_type}} <- find_mapping(path, mappings),
          {:ok, %{"v" => value} = decoded_map} <- Cyanide.decode(payload),
-         timestamp = Map.get(decoded_map, "t"),
          :ok <- Mapping.ValueType.validate_value(expected_type, value) do
-      request = {:msg, interface_name, path_tokens, value, timestamp}
+      timestamp = Map.get(decoded_map, "t")
+      request = {:msg, interface.name, path_tokens, value, timestamp}
+      GenServer.cast(handler_pid, request)
+    end
+  end
+
+  defp do_handle_data_message(
+         %{aggregation: :object} = interface,
+         path_tokens,
+         payload,
+         handler_pid
+       ) do
+    mappings_map = build_aggregate_mappings_map(interface.mappings)
+
+    with {:ok, %{"v" => value} = decoded_map} <- Cyanide.decode(payload),
+         :ok = validate_object_values(mappings_map, value) do
+      timestamp = Map.get(decoded_map, "t")
+      request = {:msg, interface.name, path_tokens, value, timestamp}
       GenServer.cast(handler_pid, request)
     end
   end
